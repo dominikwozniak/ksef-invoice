@@ -1,0 +1,26 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Cache narzędzi
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# Sekrety i dane prywatne (przykłady leżą w examples/ i są commitowane)
+/.env
+/config.toml
+
+# Wygenerowane faktury, UPO, ledger
+out/
+templates/
+
+# Prywatny worklog (osobiste zadania, realne dane)
+TODO.md

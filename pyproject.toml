@@ -1,0 +1,39 @@
+[project]
+name = "ksef-invoice"
+version = "0.1.0"
+description = "Wystawianie powtarzalnych faktur sprzedażowych w KSeF (API 2.0, FA(3))"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Dominik Woźniak" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "ksef2[pdf]>=0.18.1",
+    "typer>=0.27.0",
+]
+
+[project.scripts]
+ksef-invoice = "ksef_invoice.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.8.0,<0.9"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.15.22",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+# typer.Option/Argument w wartościach domyślnych to wzorzec Typera, nie błąd (B008).
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Option", "typer.Argument"]
