@@ -7,6 +7,7 @@ ląduje szablon — a przez CliRunner widać tylko sformatowany tekst.
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import date
 from decimal import Decimal
 from importlib.metadata import version as package_version
@@ -29,7 +30,18 @@ from ksef_invoice.config import Config, Profile
 from ksef_invoice.invoice import Invoice
 from ksef_invoice.ledger import Ledger
 
-COMMANDS = ("render", "send", "pdf", "status", "templatize", "init", "doctor")
+COMMANDS = (
+    "render",
+    "send",
+    "pdf",
+    "status",
+    "profiles",
+    "list",
+    "path",
+    "templatize",
+    "init",
+    "doctor",
+)
 
 
 def _profile(name: str) -> Profile:
@@ -598,3 +610,293 @@ def test_missing_config_gives_one_line_without_traceback(tmp_path):
     assert "Traceback" not in result.stderr
     assert len(result.stderr.strip().splitlines()) == 1, result.stderr
     assert str(tmp_path) in result.stderr
+
+
+# --- przeglądanie: profiles / list / path ------------------------------------------
+
+
+def test_list_command_does_not_shadow_the_list_builtin():
+    """Funkcja komendy nazywa się `list_invoices`, nie `list`.
+
+    cli.py ma `from __future__ import annotations`, więc Typer rozwiązuje `net: list[str]`
+    z render/send przez get_type_hints w globalsach modułu. Moduł-level `list` przesłania
+    builtin i `render` wywala się na `TypeError: 'function' object is not subscriptable`
+    (sprawdzone) — czyli nowa komenda urywa dwie istniejące.
+    """
+    assert "list" not in vars(cli), "funkcja `list` w globalsach modułu przesłania builtin"
+    assert CliRunner().invoke(app, ["render", "--help"]).exit_code == 0
+
+
+def _record_invoice(home: Path, environment: str, month: str, seq: int, *, profile: str = "klient") -> str:
+    """Wpis w ledgerze + katalog z artefaktami, jak po udanym `send`."""
+    number = f"FS/{seq}/2026"
+    Ledger(home / "out" / "ledger.json").record(
+        environment,
+        profile,
+        month,
+        seq,
+        2026,
+        {
+            "month": month,
+            "profile": profile,
+            "number": number,
+            "seq": seq,
+            "net": "1000.00",
+            "vat": "230.00",
+            "gross": "1230.00",
+            "ksef_number": f"5252000019-{month.replace('-', '')}31-8275E6C00000-{seq:02d}",
+        },
+    )
+    target = home / "out" / environment / profile / f"{month}_{number.replace('/', '-')}"
+    target.mkdir(parents=True, exist_ok=True)
+    return number
+
+
+def test_profiles_shows_nets_vat_and_due_rule(tmp_path):
+    home = _ready_home(tmp_path)
+
+    result = _run(["profiles"], home=home)
+
+    assert result.exit_code == 0, result.output
+    assert "klient" in result.stdout
+    assert "23%" in result.stdout
+    assert "+14 dni" in result.stdout
+    assert "templates/klient.xml" in result.stdout
+
+
+def test_profiles_json_has_a_stable_shape(tmp_path):
+    home = _ready_home(tmp_path)
+
+    payload = json.loads(_run(["profiles", "--json"], home=home).stdout)
+
+    assert set(payload) == {"home", "nip", "number_format", "environment", "profiles"}
+    assert payload["home"] == str(home)
+    (profile,) = payload["profiles"]
+    assert set(profile) == {
+        "name",
+        "nets",
+        "vat_rate",
+        "issue_day",
+        "due_days",
+        "due_day_next_month",
+        "template",
+    }
+    assert (profile["name"], profile["nets"], profile["due_days"]) == ("klient", 1, 14)
+
+
+def test_profiles_agrees_with_doctor_on_the_number_of_nets(tmp_path):
+    """Dwie niezależne ścieżki: doctor renderuje i waliduje XSD, profiles czyta
+    placeholdery. Rozjazd znaczyłby, że jedna z nich kłamie o tym, ile podać --net."""
+    home = _ready_home(tmp_path)
+
+    nets = json.loads(_run(["profiles", "--json"], home=home).stdout)["profiles"][0]["nets"]
+    checks = json.loads(_run(["doctor", "--json"], home=home).stdout)["checks"]
+    detail = next(check["detail"] for check in checks if check["name"] == "profil klient")
+
+    assert f"{nets}× --net" in detail
+
+
+@pytest.mark.parametrize("command", ["profiles", "list"])
+def test_browse_json_never_carries_the_token(tmp_path, command):
+    """`.env` z produkcyjnym tokenem leży obok config.toml, a load_config wciąga go do
+    Config — nowa powierzchnia maszynowa nie może go wynieść."""
+    home = _ready_home(tmp_path)
+    token = "TOKEN-KTORY-NIE-MA-PRAWA-WYJSC-1234567890"
+    # prod, nie test: doctor raportuje obecność tokenu tylko poza TEST (tam token jest
+    # niepotrzebny), a bez tego kontrola pozytywna niżej nie ma czego stwierdzić.
+    (home / ".env").write_text(f"KSEF_ENV=prod\nKSEF_TOKEN={token}\n")
+    _record_invoice(home, "prod", "2026-07", 1)
+
+    result = _run([command, "--json"], home=home)
+
+    assert result.exit_code == 0, result.output
+    assert token not in result.stdout
+    # Kontrola pozytywna: token faktycznie doszedł do konfiguracji, więc asercja powyżej
+    # nie przechodzi tylko dlatego, że .env nie został wczytany.
+    assert f"KSEF_TOKEN ustawiony ({len(token)} znaków)" in _run(["doctor"], home=home).stdout
+
+
+def test_list_on_empty_ledger_exits_zero(tmp_path):
+    """Świadoma asymetria wobec `status`, który kończy 1: `status` pyta o konkretną
+    fakturę i jej brak jest błędem, a `list` przegląda."""
+    home = _ready_home(tmp_path)
+
+    result = _run(["list"], home=home)
+
+    assert result.exit_code == 0, result.output
+    assert "Brak wystawionych faktur" in result.stdout
+
+
+def test_list_json_on_empty_ledger_is_still_a_contract(tmp_path):
+    home = _ready_home(tmp_path)
+
+    result = _run(["list", "--json"], home=home)
+
+    payload = json.loads(result.stdout)
+    assert payload["invoices"] == []
+    assert (payload["count"], payload["gross_total"]) == (0, "0")
+    assert result.exit_code == 0
+    assert result.stderr == "", result.stderr
+
+
+def test_list_shows_recorded_invoice_and_separates_prod(tmp_path):
+    home = _ready_home(tmp_path)
+    _record_invoice(home, "test", "2026-06", 3)
+    _record_invoice(home, "prod", "2026-07", 8)
+
+    testowe = _run(["list"], home=home)
+    produkcyjne = _run(["list", "--prod"], home=home)
+
+    assert "FS/3/2026" in testowe.stdout
+    assert "FS/8/2026" not in testowe.stdout
+    assert "FS/8/2026" in produkcyjne.stdout
+    assert "FS/3/2026" not in produkcyjne.stdout
+    assert "PROD" in produkcyjne.stdout
+
+
+def test_list_reports_the_gross_total(tmp_path):
+    home = _ready_home(tmp_path)
+    _record_invoice(home, "test", "2026-06", 1)
+    _record_invoice(home, "test", "2026-07", 2)
+
+    result = _run(["list"], home=home)
+
+    assert "2460.00 PLN brutto" in result.stdout
+
+
+def test_list_marks_invoices_whose_artifacts_are_gone(tmp_path):
+    """Ledger skopiowany bez out/ to połowicznie wykonana migracja — musi być widoczna."""
+    home = _ready_home(tmp_path)
+    number = _record_invoice(home, "test", "2026-07", 1)
+    shutil.rmtree(home / "out" / "test" / "klient" / f"2026-07_{number.replace('/', '-')}")
+
+    payload = json.loads(_run(["list", "--json"], home=home).stdout)
+
+    assert payload["invoices"][0]["dir"] is None
+    # Kolumna `pliki` musi stracić znacznik, a nie tylko „gdzieś" pokazać kreskę.
+    assert "✓" not in _run(["list"], home=home).stdout
+
+
+def test_list_json_carries_what_the_table_omits(tmp_path):
+    """Tabela świadomie nie ma numeru KSeF (35 znaków zawijałoby się przy 80 kolumnach
+    i i tak nie dałoby się skopiować) ani ścieżki — więc jedno i drugie musi być w JSON-ie
+    w całości, inaczej ta decyzja gubi dane."""
+    home = _ready_home(tmp_path)
+    _record_invoice(home, "test", "2026-07", 1)
+
+    payload = json.loads(_run(["list", "--json"], home=home).stdout)
+
+    assert set(payload) == {"home", "environment", "count", "gross_total", "invoices"}
+    (invoice,) = payload["invoices"]
+    assert set(invoice) == {
+        "month",
+        "profile",
+        "number",
+        "seq",
+        "net",
+        "vat",
+        "gross",
+        "ksef_number",
+        "acquisition_date",
+        "sent_at",
+        "dir",
+    }
+    assert invoice["ksef_number"] == "5252000019-20260731-8275E6C00000-01"
+    assert invoice["ksef_number"] not in _run(["list"], home=home).stdout
+    assert Path(invoice["dir"]).is_dir()
+
+
+def test_list_rejects_unknown_profile(tmp_path):
+    """Bez tej walidacji literówka wygląda jak „brak faktur" — najgorszy fałszywy
+    negatyw w narzędziu, w którym numeracja ma skutki prawne."""
+    home = _ready_home(tmp_path)
+    _record_invoice(home, "test", "2026-07", 1)
+
+    result = _run(["list", "--profile", "klint"], home=home)
+
+    assert result.exit_code == 2, result.output
+    assert "klient" in result.output
+
+
+def test_list_accepts_profile_known_only_to_the_ledger(tmp_path):
+    """Profil usunięty z config.toml ma nadal historię, więc musi dać się o nią zapytać."""
+    home = _ready_home(tmp_path)
+    _record_invoice(home, "test", "2026-04", 1, profile="juz-nieobecny")
+
+    result = _run(["list", "--profile", "juz-nieobecny"], home=home)
+
+    assert result.exit_code == 0, result.output
+    assert "FS/1/2026" in result.stdout
+
+
+def test_list_year_filter(tmp_path):
+    home = _ready_home(tmp_path)
+    _record_invoice(home, "test", "2026-07", 1)
+
+    assert "FS/1/2026" in _run(["list", "--year", "2026"], home=home).stdout
+    assert "Brak wystawionych faktur" in _run(["list", "--year", "2025"], home=home).stdout
+
+
+def test_path_prints_one_clean_line_for_a_deep_home(tmp_path):
+    """Rich zawija do szerokości terminala, więc console.print wstawiłby w środek długiej
+    ścieżki znak nowej linii i zepsuł `open $(ksef-invoice path ...)`. Głęboka ścieżka
+    jest tu istotą testu, nie ozdobą."""
+    deep = tmp_path / "bardzo" / "gleboko" / "zagniezdzony" / "katalog" / "roboczy-uzytkownika"
+    deep.mkdir(parents=True)
+    home = _ready_home(deep)
+    _record_invoice(home, "test", "2026-07", 1)
+
+    result = _run(["path", "--month", "2026-07"], home=home)
+
+    assert result.exit_code == 0, result.output
+    (line,) = result.stdout.splitlines()
+    assert "…" not in line
+    assert Path(line).is_dir(), line
+    assert len(line) > 80, f"ścieżka za krótka, żeby test cokolwiek dowodził: {len(line)}"
+
+
+def test_path_autoselects_the_only_profile(tmp_path):
+    home = _ready_home(tmp_path)
+    _record_invoice(home, "test", "2026-07", 1)
+
+    assert _run(["path", "--month", "2026-07"], home=home).stdout.strip().endswith("2026-07_FS-1-2026")
+
+
+def test_path_reports_missing_invoice_on_stderr_only(tmp_path):
+    """`$(...)` nie może dostać śmieci na stdout, gdy nie ma czego otworzyć."""
+    home = _ready_home(tmp_path)
+
+    result = _run(["path", "--month", "2019-01"], home=home)
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "Brak zapisanej faktury" in result.stderr
+
+
+def test_path_lists_every_directory_after_force(tmp_path):
+    home = _ready_home(tmp_path)
+    _record_invoice(home, "test", "2026-07", 1)
+    (home / "out" / "test" / "klient" / "2026-07_FS-9-2026").mkdir()
+
+    lines = _run(["path", "--month", "2026-07"], home=home).stdout.splitlines()
+
+    assert len(lines) == 2
+    assert all(Path(line).is_dir() for line in lines)
+
+
+def test_path_and_pdf_agree_on_directories(tmp_path):
+    """Obie komendy chodzą po tym samym globie — nie mogą się rozjechać co do tego,
+    które katalogi istnieją."""
+    home = _ready_home(tmp_path)
+    _run(["render", "--profile", "klient", "--month", "2026-07", "--net", "1000"], home=home)
+    _run(["render", "--profile", "klient", "--month", "2026-07", "--net", "2000", "--seq", "9"], home=home)
+
+    from_path = {Path(line) for line in _run(["path", "--month", "2026-07"], home=home).stdout.splitlines()}
+    pdf_output = _run(["pdf", "--month", "2026-07"], home=home).stdout
+
+    assert len(from_path) == 2, from_path
+    assert pdf_output.count("✅") == len(from_path)
+    # Bez białych znaków, bo `pdf` wypisuje ścieżki przez console.print i rich zawija je
+    # do szerokości terminala — to samo, czego `path` unika przez typer.echo.
+    squashed = "".join(pdf_output.split())
+    assert all(directory.name in squashed for directory in from_path)
