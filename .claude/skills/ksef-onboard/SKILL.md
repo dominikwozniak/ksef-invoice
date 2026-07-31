@@ -99,8 +99,12 @@ wszystko się waliduje i renderuje, a mimo to przy innych kwotach da złą faktu
 | `ilość P_8B=... ≠ 1` | Szablon podstawia kwotę i pod cenę jednostkową, i pod wartość pozycji. To poprawne tylko przy ilości 1. Przy większej ilości `--net` da złą fakturę — trzeba ręcznie poprawić `templates/<profil>.xml`. |
 | `Wykryto dodatkowe stawki VAT` | Faktura ma więcej niż jedną stawkę, a model obsługuje jedną. Sumy pozostałych stawek zostały w szablonie jako **sztywne kwoty** — przy innych kwotach faktura się rozjedzie. |
 | `Nie udało się odczytać stawki VAT` | Przyjęto 23% na wyczucie. Sprawdź `vat_rate` w `config.toml`. |
+| `Nietypowa stawka P_12=...` | Stawki nie dało się zinterpretować, więc trafiła do configu jak leci. Zostawiona bez poprawki wywali każdą kolejną komendę — ustal `vat_rate` ręcznie. |
 | `NIP sprzedawcy ... różni się od nip w config.toml` | KSeF taką fakturę odrzuci. Ustalcie, która wartość jest prawdziwa, i popraw drugą. |
-| `Brak pola P_1 / P_2 / P_6 / P_15 / Termin` | XML nie jest kompletną fakturą sprzedażową — poproś o inny plik. |
+| `Brak NIP-u sprzedawcy w Podmiot1` | To nie wygląda na fakturę sprzedażową z KSeF — poproś o inny plik. |
+| `Brak pola P_1 / P_2 / P_6` | Brakuje daty wystawienia, numeru albo daty sprzedaży — placeholder trzeba wstawić ręcznie. Zwykle znaczy, że plik nie jest kompletną fakturą. |
+| `Brak P_13_1/P_13_9 (suma netto)` / `Brak P_15 (brutto)` | Szablon nie ma gdzie wstawić sum — bez ręcznej poprawki `render` przerwie na niepodmienionym placeholderze. |
+| `Brak Platnosc/TerminPlatnosci/Termin` | Faktura źródłowa nie miała terminu płatności — dodaj `{{payment_due}}` ręcznie. |
 
 Przy ilości ≠ 1 i przy wielu stawkach VAT **powiedz wprost, że szablon wymaga ręcznej korekty**,
 i wskaż, którego fragmentu `templates/<profil>.xml` to dotyczy. To dwa przypadki, w których
@@ -124,8 +128,10 @@ uv run ksef-invoice render --profile <profil> --month <RRRR-MM> --net <kwota> [-
 Kwoty **weź od użytkownika**, nie wymyślaj. Jeśli chce tylko sprawdzić, czy działa, zaproponuj
 wprost kwoty próbne (`--net 1000`) i powiedz, że `render` nic nie wysyła.
 
-Otwórz powstały PDF i poproś użytkownika, żeby sprawdził to, czego kod nie oceni: opisy pozycji,
-dane nabywcy, numer konta. Kwoty, daty i numer weryfikuje już `render` wraz z walidacją XSD.
+Otwórz powstały podgląd i poproś użytkownika, żeby sprawdził to, czego kod nie oceni: opisy
+pozycji, dane nabywcy, numer konta. Kwoty, daty i numer weryfikuje już `render` wraz z walidacją
+XSD. Ścieżkę do otwarcia bierz z linii `Podgląd:` — bez bibliotek natywnych powstaje sam
+`invoice.html` zamiast PDF-a i to jego wtedy otwierasz.
 
 ## Gdy coś nie zadziała
 
@@ -133,8 +139,10 @@ Komunikaty CLI są instruktażowe — zwykle mówią, co zrobić. Najczęstsze:
 
 | Komunikat | Co z tym zrobić |
 |---|---|
-| `Brak <ścieżka>/config.toml — uruchom najpierw ksef-invoice init` | Cofnij się do kroku 2. |
-| `Profil 'x' już jest w config.toml` | Nazwa zajęta. Zaproponuj inną (`--name`); nie sięgaj po `--force`, bo nadpisze cudzy profil. |
+| `Brak <ścieżka>/config.toml. Utwórz go komendą ksef-invoice init --nip <NIP>` | Cofnij się do kroku 2. |
+| `config.toml: brak sekcji [profiles.<nazwa>]` | Był sam `init`, nie ma jeszcze żadnego profilu — to krok 3, nie awaria. |
+| `doctor`: ⚠ `brak bibliotek natywnych WeasyPrint` | Tylko PDF nie powstaje; XML, walidacja i wysyłka działają. Podaj użytkownikowi komendę instalacji z komunikatu i idź dalej — to nie blokuje onboardingu. |
+| `Profil 'x' już jest w config.toml` | Nazwa zajęta. Zaproponuj inną (`--name`); nie sięgaj po `--force`, bo podmieni istniejący profil na nowy (jego szablon i regułę terminu). |
 | `NIP ... ma niepoprawną sumę kontrolną` | Literówka. Poproś o NIP jeszcze raz, nie „popraw" go sam. |
 | `Nie udało się przetworzyć <plik>` | XML nie przechodzi walidacji XSD FA(3) — najczęściej to nie faktura albo nie ten wzór. Poproś o plik pobrany wprost z KSeF. |
 | `doctor`: `brak placeholderów {{line1_net}}` | Szablon nie ma zmiennych pozycji. Zwykle znaczy, że `templatize` dostał plik już będący szablonem, a nie fakturę. |
@@ -143,7 +151,8 @@ Komunikaty CLI są instruktażowe — zwykle mówią, co zrobić. Najczęstsze:
 
 Podsumuj: jaki profil powstał, ile bierze kwot `--net`, jaka stawka VAT i jaki termin, gdzie leży
 szablon. Odeślij do `README.md` po instrukcję pierwszej wysyłki i powiedz wyraźnie, że domyślnie
-wszystko idzie na środowisko **testowe**, a produkcja wymaga jawnej flagi `--prod` i tokenu KSeF.
+wszystko idzie na środowisko **testowe**, a produkcja wymaga tokenu KSeF i jawnej flagi `--prod`
+— albo `KSEF_ENV=prod` w `.env`, co znosi to zabezpieczenie na stałe i dlatego nie jest zalecane.
 
 Jeśli którykolwiek krok się nie udał, powiedz konkretnie, co zostało do zrobienia ręcznie.
 Zielony `doctor` jest jedynym dowodem gotowego setupu — bez niego nie zostawiaj wrażenia,
