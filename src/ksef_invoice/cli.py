@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import asdict
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import typer
@@ -29,7 +31,33 @@ from .templatize import templatize as run_templatize
 from .visualize import to_html, to_pdf
 
 app = typer.Typer(help="Wystawianie powtarzalnych faktur sprzedażowych w KSeF.", no_args_is_help=True)
+
+# Payload (tabele, ścieżki, potwierdzenia) na stdout; błędy i ostrzeżenia na stderr —
+# inaczej `ksef-invoice status ... | jq` psuje się, gdy w środku wypadnie ostrzeżenie.
 console = Console()
+# soft_wrap, bo komunikaty błędów zawierają ścieżki: twarde zawijanie rich-a wstawiało
+# w środek ścieżki znak nowej linii, co psuło kopiowanie, grep i dopasowanie po treści
+# komunikatu (na tym opiera się tabela troubleshootingu w skillu ksef-onboard).
+err_console = Console(stderr=True, soft_wrap=True)
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(package_version("ksef-invoice"))
+        raise typer.Exit()
+
+
+@app.callback()
+def _app(
+    show_version: bool = typer.Option(
+        None,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Pokaż wersję i zakończ.",
+    ),
+) -> None:
+    pass
 
 
 def _parse_nets(nets: list[str]) -> list[Decimal]:
@@ -90,7 +118,7 @@ def _print_summary(config: Config, profile: Profile, invoice: Invoice) -> None:
     table.add_row("Szablon", str(profile.template_path.name))
     console.print(table)
     if invoice.payment_due < invoice.issue_date:
-        console.print(
+        err_console.print(
             "[yellow]Uwaga: termin płatności wypada przed datą wystawienia "
             "(faktura wystawiana po terminie wynikającym z reguły profilu).[/]"
         )
@@ -114,7 +142,7 @@ def _write_visualizations(target: Path, xml: bytes) -> None:
         if sys.platform == "darwin":
             msg += " + export DYLD_LIBRARY_PATH=/opt/homebrew/lib"
         msg += "). HTML zapisany."
-        console.print(f"[yellow]{msg}[/]")
+        err_console.print(f"[yellow]{msg}[/]")
 
 
 NET_HELP = (
@@ -167,7 +195,7 @@ def send(
     ledger = Ledger(config.out_dir / "ledger.json")
     existing = ledger.get(config.environment, selected.name, month)
     if existing and not force:
-        console.print(
+        err_console.print(
             f"[red]Faktura {selected.name} za {month} ({config.environment}) już wystawiona: "
             f"{existing.get('number')} → {existing.get('ksef_number')}.[/]\n"
             "Użyj --force, jeśli świadomie chcesz wysłać kolejną."
@@ -178,7 +206,7 @@ def send(
 
     clash = ledger.number_exists(config.environment, number)
     if clash and not force:
-        console.print(
+        err_console.print(
             f"[red]Numer {number} jest już użyty w ledgerze ({config.environment}): "
             f"profil {clash[0]}, miesiąc {clash[1]}.[/]\n"
             "Nie podawaj --seq drugiej fakturze tego samego miesiąca (licznik dolicza się sam). "
@@ -186,7 +214,7 @@ def send(
         )
         raise typer.Exit(code=1)
     if config.environment == "prod" and seq is None and not ledger.year_started("prod", year) and not force:
-        console.print(
+        err_console.print(
             f"[red]To pierwsza produkcyjna wysyłka w {year} — numer wyszedłby {number}.[/]\n"
             "Zasiej licznik: --seq <następny numer po ostatniej ręcznej fakturze> "
             "(albo --force, jeśli naprawdę zaczynasz numerację od tego numeru)."
@@ -209,8 +237,8 @@ def send(
     try:
         result = send_invoice(invoice.xml, config)
     except Exception as error:
-        console.print(f"\n[red]Wysyłka nie powiodła się:[/] {error}")
-        console.print(
+        err_console.print(f"\n[red]Wysyłka nie powiodła się:[/] {error}")
+        err_console.print(
             "Faktura NIE została zarejestrowana w ledgerze — po usunięciu przyczyny uruchom komendę ponownie."
         )
         raise typer.Exit(code=1) from None
@@ -245,7 +273,7 @@ def send(
     if result.upo:
         console.print(f"✅ UPO zapisane: [bold]{target / 'upo.xml'}[/]")
     else:
-        console.print("[yellow]UPO jeszcze niedostępne — sprawdź później w Aplikacji Podatnika.[/]")
+        err_console.print("[yellow]UPO jeszcze niedostępne — sprawdź później w Aplikacji Podatnika.[/]")
     console.print(f"Artefakty: {target}")
 
 
@@ -261,7 +289,9 @@ def pdf(
     environment = "prod" if prod else config.environment
     matches = sorted((config.out_dir / environment / selected.name).glob(f"{month}_*/invoice.xml"))
     if not matches:
-        console.print(f"Brak zapisanej faktury {selected.name} za {month} ({environment}) w out/.")
+        err_console.print(
+            f"[red]Brak zapisanej faktury {selected.name} za {month} ({environment}) w out/.[/]"
+        )
         raise typer.Exit(code=1)
     for xml_path in matches:
         _write_visualizations(xml_path.parent, xml_path.read_bytes())
@@ -280,7 +310,7 @@ def status(
     environment = "prod" if prod else config.environment
     entry = Ledger(config.out_dir / "ledger.json").get(environment, selected.name, month)
     if not entry:
-        console.print(f"Brak wpisu {selected.name} za {month} ({environment}).")
+        err_console.print(f"[red]Brak wpisu {selected.name} za {month} ({environment}).[/]")
         raise typer.Exit(code=1)
     console.print_json(json.dumps(entry, ensure_ascii=False))
 
@@ -325,7 +355,7 @@ def templatize(
     try:
         result = run_templatize(input_xml.read_bytes())
     except Exception as error:
-        console.print(f"[red]Nie udało się przetworzyć {input_xml}:[/] {error}")
+        err_console.print(f"[red]Nie udało się przetworzyć {input_xml}:[/] {error}")
         raise typer.Exit(code=1) from None
 
     target = out or (Path("templates") / f"{name}.xml" if name else None)
@@ -339,7 +369,7 @@ def templatize(
         console.print(result.xml.decode("utf-8"))
 
     for warning in result.warnings:
-        console.print(f"[yellow]⚠ {warning}[/]")
+        err_console.print(f"[yellow]⚠ {warning}[/]")
 
     profile_name = name or "moj-profil"
     template_ref = (
@@ -369,14 +399,14 @@ def templatize(
     try:
         config_path = append_profile(PROJECT_ROOT, name, block, force=force)
     except (FileNotFoundError, ValueError) as error:
-        console.print(f"[red]{error}[/]")
+        err_console.print(f"[red]{error}[/]")
         raise typer.Exit(code=1) from None
 
     console.print(f"✅ Profil [bold]{name}[/] dopisany do {config_path}")
 
     declared = config_nip(config_path)
     if result.seller_nip and declared and result.seller_nip != declared:
-        console.print(
+        err_console.print(
             f"[yellow]⚠ NIP sprzedawcy w fakturze ({result.seller_nip}) różni się od nip w config.toml "
             f"({declared}) — KSeF odrzuci taką fakturę. Popraw jedno z nich.[/]"
         )
@@ -393,7 +423,7 @@ def init(
         config_path = create_config(PROJECT_ROOT, nip, force=force)
         env_path = create_env(PROJECT_ROOT, force=force)
     except (FileExistsError, FileNotFoundError, ValueError) as error:
-        console.print(f"[red]{error}[/]")
+        err_console.print(f"[red]{error}[/]")
         raise typer.Exit(code=1) from None
 
     console.print(f"✅ {config_path}")
@@ -401,7 +431,7 @@ def init(
 
     warning = suspicious_nip_warning(config_nip(config_path) or "")
     if warning:
-        console.print(f"[yellow]⚠ {warning}[/]")
+        err_console.print(f"[yellow]⚠ {warning}[/]")
 
     console.print(
         "\nDalej: pobierz z KSeF XML swojej wcześniejszej faktury (Aplikacja Podatnika → faktura → "
@@ -411,20 +441,50 @@ def init(
 
 
 @app.command()
-def doctor() -> None:
+def doctor(
+    as_json: bool = typer.Option(False, "--json", help="Wypisz wynik jako JSON (dla skryptów)."),
+) -> None:
     """Sprawdź spójność setupu (config, profile, szablony, token, licznik) — nic nie wysyła."""
+    checks = run_checks()
+    failed = [check for check in checks if check.status == FAIL]
+
+    if as_json:
+        # Świadomie bez rich: kontrakt maszynowy nie może zależeć od szerokości terminala.
+        payload = {
+            "home": str(PROJECT_ROOT),
+            "checks": [asdict(check) for check in checks],
+            "failed": len(failed),
+        }
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        if failed:
+            raise typer.Exit(code=1)
+        return
+
     symbols = {OK: "[green]✅[/]", WARN: "[yellow]⚠[/]", FAIL: "[red]❌[/]"}
     table = Table(title="Diagnostyka setupu", show_header=False)
-    checks = run_checks()
     for check in checks:
         table.add_row(symbols[check.status], check.name, check.detail)
     console.print(table)
 
-    failed = [check for check in checks if check.status == FAIL]
     if failed:
-        console.print(f"\n[red]{len(failed)} problem(y) do naprawy przed wysyłką.[/]")
+        err_console.print(f"\n[red]{len(failed)} problem(y) do naprawy przed wysyłką.[/]")
         raise typer.Exit(code=1)
     console.print(
         "\n✅ Setup wygląda dobrze. Podgląd faktury: [bold]ksef-invoice render --profile <profil> "
         "--month <RRRR-MM> --net <kwota>[/]"
     )
+
+
+def main() -> None:
+    """Wejście console_scriptu.
+
+    Łapie dwa typy, które `load_config` dokumentuje jako swoje — bez tego każdy problem
+    z configiem kończy się surowym tracebackiem, a to jest dokładnie ten stan, w którym
+    startuje świeża instalacja (`render`/`send`/`pdf`/`status` wołają load_config bez try).
+    typer.Exit i błędy click są z innych hierarchii, więc tego nie przechwytujemy.
+    """
+    try:
+        app()
+    except (FileNotFoundError, ValueError) as error:
+        err_console.print(f"[red]{error}[/]")
+        raise SystemExit(1) from None

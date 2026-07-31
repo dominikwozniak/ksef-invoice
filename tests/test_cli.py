@@ -6,14 +6,17 @@ ląduje szablon — a przez CliRunner widać tylko sformatowany tekst.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from decimal import Decimal
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import pytest
 import typer
 from typer.testing import CliRunner
 
+import ksef_invoice.cli as cli
 from ksef_invoice.cli import (
     _allocate_number,
     _invoice_dir,
@@ -184,3 +187,74 @@ def test_no_args_shows_help_not_traceback():
 
     assert "Usage" in result.output
     assert result.exit_code != 0  # no_args_is_help=True zwraca kod użycia
+
+
+def test_help_keeps_app_description_after_adding_callback():
+    """@app.callback() bez docstringa nie może przesłonić help= z Typer()."""
+    result = CliRunner().invoke(app, ["--help"])
+
+    assert "Wystawianie powtarzalnych faktur" in result.output
+
+
+def test_version_matches_package_metadata():
+    result = CliRunner().invoke(app, ["--version"])
+
+    assert result.exit_code == 0
+    assert result.output.strip() == package_version("ksef-invoice")
+
+
+# --- kontrakt maszynowy doctor --json ---------------------------------------------
+
+
+def test_doctor_json_is_machine_readable():
+    """Hermetycznie: sprawdzamy kształt i spójność, nie treść zależną od środowiska."""
+    result = CliRunner().invoke(app, ["doctor", "--json"])
+
+    payload = json.loads(result.stdout)
+    assert set(payload) == {"home", "checks", "failed"}
+    assert payload["failed"] == sum(1 for check in payload["checks"] if check["status"] == "fail")
+    assert result.exit_code == (1 if payload["failed"] else 0)
+    for check in payload["checks"]:
+        assert set(check) == {"name", "status", "detail"}
+        assert check["status"] in {"ok", "warn", "fail"}
+
+
+def test_doctor_json_writes_nothing_to_stderr():
+    """`doctor --json | jq` nie może się psuć od ostrzeżenia wypadającego w środku."""
+    result = CliRunner().invoke(app, ["doctor", "--json"])
+
+    assert result.stderr == ""
+
+
+# --- main(): handler, który zamienia oczekiwane błędy w jedną linię ----------------
+
+
+def test_main_reports_expected_errors_as_one_line(monkeypatch, capsys):
+    message = "Brak /nie/ma/config.toml. Utwórz go komendą `ksef-invoice init --nip <NIP>`."
+
+    def _raise():
+        raise FileNotFoundError(message)
+
+    monkeypatch.setattr(cli, "app", _raise)
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+
+    captured = capsys.readouterr()
+    assert exit_info.value.code == 1
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    # Ścieżka musi zostać w jednej linii — od tego zależy grep i skill ksef-onboard.
+    assert "/nie/ma/config.toml" in captured.err.splitlines()[0]
+
+
+def test_main_does_not_swallow_unexpected_errors(monkeypatch):
+    """Handler ma być wąski: prawdziwy bug musi nadal wyjść z tracebackiem."""
+
+    def _bug():
+        raise RuntimeError("prawdziwy bug")
+
+    monkeypatch.setattr(cli, "app", _bug)
+
+    with pytest.raises(RuntimeError, match="prawdziwy bug"):
+        cli.main()
