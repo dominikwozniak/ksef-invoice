@@ -62,6 +62,17 @@ daje `{home, checks, failed}`.
 - Wszystko zielone i nie ma nowego profilu do dodania → nie ma tu nic do roboty. Powiedz to
   wprost, zamiast szukać sobie zajęcia.
 
+Gdy pytanie brzmi tylko „co ja tu mam", zamiast `doctor` wystarczą dwie tańsze komendy —
+`doctor` przy okazji renderuje próbnie każdy profil i waliduje XSD:
+
+```bash
+ksef-invoice profiles   # profile z config.toml: ile --net, VAT, termin, szablon (--json)
+ksef-invoice list       # wystawione faktury z lokalnego rejestru (--profile, --year, --prod, --json)
+```
+
+`list` czyta `out/ledger.json`, nie KSeF — nie potrzebuje tokenu i działa offline. Katalog
+z artefaktami konkretnej faktury daje `ksef-invoice path --profile <p> --month <RRRR-MM>`.
+
 ### 2. Utwórz konfigurację (tylko gdy nie istnieje)
 
 Potrzebny jest NIP sprzedawcy — czyli **firmy użytkownika**, nie klienta. To częste pomylenie,

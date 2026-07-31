@@ -142,9 +142,16 @@ jobs:
           test ! -d /tmp/praca/templates            # nie zapisuje względem cwd
 
           ksef-invoice --home "$HOME_DIR" doctor
+          ksef-invoice --home "$HOME_DIR" profiles | grep -q klient
+          # Pusty rejestr to kod 0, nie błąd — a `list` musi to powiedzieć bez tracebacku.
+          ksef-invoice --home "$HOME_DIR" list | grep -q "Brak wystawionych faktur"
+
           ksef-invoice --home "$HOME_DIR" render --profile klient --month 2026-07 --net 1000
           test -f "$HOME_DIR"/out/test/klient/2026-07_*/invoice.xml
           test -f "$HOME_DIR"/out/test/klient/2026-07_*/invoice.html
+          # `path` musi dać dokładnie jedną linię, którą da się podstawić w shellu.
+          test "$(ksef-invoice --home "$HOME_DIR" path --month 2026-07 | wc -l)" -eq 1
+          test -d "$(ksef-invoice --home "$HOME_DIR" path --month 2026-07)"
 
       - name: python -m i --json też działają
         run: |

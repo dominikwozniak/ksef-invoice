@@ -37,6 +37,19 @@ ale ledger **nieaktualny** jest cichy i kończy się duplikatem numeru faktury.
 - Globalna flaga `--home` i zmienna `KSEF_INVOICE_HOME`. Precedencja: flaga > zmienna >
   `~/.ksef-invoice`. Katalog jest jeden na użytkownika i **nie** jest szukany w górę od
   katalogu roboczego — numer faktury nie może zależeć od tego, gdzie stoi shell.
+- **Przeglądanie katalogu roboczego z CLI** — dotąd dało się to tylko przez Findera:
+  - `profiles` — profile z `config.toml` (ile kwot `--net`, VAT, reguła terminu, szablon).
+    Bez próbnego renderu i walidacji XSD, które robi `doctor`, więc natychmiastowe.
+  - `list` — wystawione faktury z `out/ledger.json`, z `--profile`, `--year` i `--prod`.
+    Kolumna `pliki` pokazuje, czy artefakty nadal leżą w `out/` — `—` po migracji znaczy
+    ledger skopiowany bez `out/`. Brak faktur to kod 0, nie błąd.
+  - `path` — katalog z artefaktami faktury, jedną linią przez `typer.echo`, żeby działało
+    `open $(ksef-invoice path --month 2026-07)`. Wypisuje wszystkie katalogi miesiąca, bo
+    po `send --force` bywa ich więcej niż jeden.
+
+  Wszystkie trzy są tylko do odczytu, nie dotykają sieci i nie potrzebują tokenu; `list`
+  i `profiles` mają `--json`. Odczytu wprost z KSeF **nie ma** — wymagałby tokenu
+  z uprawnieniem `invoice_read`, w KSeF rozdzielnym od `invoice_write`, którym się wystawia.
 - `--version`, `python -m ksef_invoice`, `doctor --json` (`{home, checks, failed}`).
 - `doctor` wypisuje rozwiązany katalog roboczy i rozróżnia trzy stany PDF-a.
 - Extra `[pdf]` — instalacja `ksef-invoice[pdf]` dla lokalnego PDF-a.

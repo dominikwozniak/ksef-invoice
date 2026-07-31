@@ -62,6 +62,9 @@ out/             wystawione faktury, UPO, meta.json
 out/ledger.json  licznik numeracji — źródło prawdy dla numerów faktur
 ```
 
+To zwykłe pliki — przeglądasz je w Finderze, a szablony edytujesz w edytorze. Z CLI zawartość
+pokazują [`profiles`, `list` i `path`](#przegl%C4%85danie).
+
 Jeden katalog do backupu. Chcesz go trzymać w Dropboksie albo mieć osobny na inną firmę:
 
 ```bash
@@ -145,6 +148,8 @@ do tego trzeba jawnego `--force`.
 ```bash
 ksef-invoice --install-completion    # uzupełnianie nazw komend i flag w Twoim shellu
 ksef-invoice doctor --json           # wynik diagnostyki maszynowo: {home, checks, failed}
+ksef-invoice profiles --json         # profile z config.toml (bez tokenu)
+ksef-invoice list --json | jq -r '.invoices[].dir'   # katalogi wszystkich faktur
 ```
 
 Kody wyjścia: `0` — OK, `1` — błąd (brak configu, guard numeracji, `doctor` zgłosił FAIL),
@@ -190,6 +195,33 @@ ksef-invoice status --profile klient-a --month 2026-07 [--prod]
 # Diagnostyka setupu (profile, szablony, token, licznik) — nic nie wysyła
 ksef-invoice doctor
 ```
+
+### Przeglądanie
+
+Trzy komendy czytają to, co masz w katalogu roboczym. Żadna nie dotyka sieci i żadna nie
+potrzebuje tokenu:
+
+```bash
+# Co jest w config.toml: ile kwot --net bierze profil, VAT, termin, który szablon
+ksef-invoice profiles
+
+# Historia wystawionych faktur z out/ledger.json
+ksef-invoice list
+ksef-invoice list --profile klient-a --year 2026 --prod
+
+# Ścieżka do artefaktów — pod podstawienie w shellu
+open $(ksef-invoice path --profile klient-a --month 2026-07)
+open $(ksef-invoice path --month 2026-07 --prod)/invoice.pdf   # --profile zbędny przy jednym profilu
+```
+
+`list` czyta **lokalny rejestr**, nie KSeF — pokazuje numer, który przydzieliło to narzędzie,
+i działa offline. Kolumna `pliki` mówi, czy artefakty faktury nadal leżą w `out/`; `—` po
+migracji znaczy, że ledger został skopiowany bez `out/`. Tabela świadomie nie ma numeru KSeF
+ani ścieżki — pełne dane daje `--json`, a jedną fakturę `status --month`.
+
+Odczyt wprost z KSeF (np. żeby zobaczyć faktury wystawione poza tym narzędziem) wymagałby
+tokenu z uprawnieniem **`invoice_read`** — w KSeF jest to zakres rozdzielny od `invoice_write`,
+którym się wystawia. Nie ma tego jeszcze.
 
 Po przyjęciu faktury w `~/.ksef-invoice/out/<env>/<profil>/<miesiąc>_<numer>/` lądują:
 `invoice.xml`, `invoice.html` (oficjalna wizualizacja; `invoice.pdf` przy instalacji
