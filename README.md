@@ -296,6 +296,10 @@ działania (wzorce `config.toml` i `.env` są wbudowane w kod).
 Dokumentacja API: [CIRFMF/ksef-docs](https://github.com/CIRFMF/ksef-docs),
 środowiska: test `api-test.ksef.mf.gov.pl`, demo `api-demo.ksef.mf.gov.pl`, prod `api.ksef.mf.gov.pl`.
 
+## Zmiany
+
+Historia wersji i instrukcja migracji: [CHANGELOG.md](CHANGELOG.md).
+
 ## Licencja
 
 MIT — zobacz [LICENSE](LICENSE).
