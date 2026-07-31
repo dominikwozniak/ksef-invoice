@@ -598,7 +598,7 @@ def templatize(
     try:
         result = run_templatize(input_xml.read_bytes())
     except Exception as error:
-        err_console.print(f"[red]Nie udało się przetworzyć {input_xml}:[/] {error}")
+        err_console.print(f"[red]Nie udało się przetworzyć {input_xml}:[/] {escape(str(error))}")
         raise typer.Exit(code=1) from None
 
     # Względem home, nie cwd: config.py składa ścieżkę szablonu jako `home / template`,
@@ -644,7 +644,7 @@ def templatize(
     try:
         config_path = append_profile(home, name, block, force=force)
     except (FileNotFoundError, ValueError) as error:
-        err_console.print(f"[red]{error}[/]")
+        err_console.print(f"[red]{escape(str(error))}[/]")
         raise typer.Exit(code=1) from None
 
     console.print(f"✅ Profil [bold]{name}[/] dopisany do {config_path}")
@@ -670,7 +670,7 @@ def init(
         config_path = create_config(home, nip, force=force)
         env_path = create_env(home, force=force)
     except (FileExistsError, FileNotFoundError, ValueError) as error:
-        err_console.print(f"[red]{error}[/]")
+        err_console.print(f"[red]{escape(str(error))}[/]")
         raise typer.Exit(code=1) from None
 
     console.print(f"✅ {config_path}")
@@ -737,9 +737,13 @@ def main() -> None:
     z configiem kończy się surowym tracebackiem, a to jest dokładnie ten stan, w którym
     startuje świeża instalacja (`render`/`send`/`pdf`/`status` wołają load_config bez try).
     typer.Exit i błędy click są z innych hierarchii, więc tego nie przechwytujemy.
+
+    escape na treści wyjątku, bo komunikaty load_config zawierają nazwy sekcji w nawiasach
+    kwadratowych — bez tego z „brak sekcji [profiles.<nazwa>]" rich zjadał dokładnie tę
+    część, która mówi, co zrobić.
     """
     try:
         app()
     except (FileNotFoundError, ValueError) as error:
-        err_console.print(f"[red]{error}[/]")
+        err_console.print(f"[red]{escape(str(error))}[/]")
         raise SystemExit(1) from None

@@ -612,6 +612,34 @@ def test_missing_config_gives_one_line_without_traceback(tmp_path):
     assert str(tmp_path) in result.stderr
 
 
+def test_error_handler_does_not_let_rich_eat_the_actionable_part(tmp_path):
+    """Regresja: komunikat „brak sekcji [profiles.<nazwa>]" tracił nazwę sekcji, bo rich
+    czytał ją jako znacznik stylu — czyli ginęła dokładnie ta część, która mówi, co zrobić.
+    To pierwszy komunikat, jaki widzi ktoś, kto po `init` nie dodał jeszcze profilu.
+
+    Przez `python -m`, bo escape'owanie siedzi w main(), a CliRunner woła app() i zamiast
+    komunikatu dostaje sam wyjątek w result.exception.
+    """
+    import os
+    import subprocess
+    import sys
+
+    home = tmp_path / "bez-profili"
+    _run(["init", "--nip", "5252000019"], home=home)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "ksef_invoice", "--home", str(home), "profiles"],
+        capture_output=True,
+        text=True,
+        env=os.environ,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "[profiles.<nazwa>]" in result.stderr, result.stderr
+    assert "Traceback" not in result.stderr
+
+
 # --- przeglądanie: profiles / list / path ------------------------------------------
 
 
