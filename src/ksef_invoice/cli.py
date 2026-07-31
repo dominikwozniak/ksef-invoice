@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -109,9 +110,11 @@ def _write_visualizations(target: Path, xml: bytes) -> None:
     if pdf:
         (target / "invoice.pdf").write_bytes(pdf)
     else:
-        console.print(
-            "[yellow]PDF pominięty — brak bibliotek WeasyPrint (macOS: brew install pango). HTML zapisany.[/]"
-        )
+        msg = "PDF pominięty — brak bibliotek WeasyPrint (macOS: brew install pango"
+        if sys.platform == "darwin":
+            msg += " + export DYLD_LIBRARY_PATH=/opt/homebrew/lib"
+        msg += "). HTML zapisany."
+        console.print(f"[yellow]{msg}[/]")
 
 
 NET_HELP = (
