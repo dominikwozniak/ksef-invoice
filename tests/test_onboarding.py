@@ -241,6 +241,21 @@ def test_doctor_accepts_issue_day_last_mid_month(tmp_path):
     assert "2026-07" in next(check.detail for check in checks if check.name == "profil demo")
 
 
+@pytest.mark.parametrize("bad", ['"foo"', "0"])
+def test_doctor_reports_invalid_issue_day_instead_of_crashing(tmp_path, bad):
+    """Zepsute issue_day ma być wynikiem diagnostyki, nie jej końcem.
+
+    Wybór miesiąca próbnego czyta issue_day, więc musi biec pod tym samym try
+    co render — inaczej `doctor` wywala się tracebackiem na pliku, który ma zbadać.
+    """
+    root = healthy_root(tmp_path)
+    config = (root / "config.toml").read_text().replace('issue_day = "today"', f"issue_day = {bad}")
+    (root / "config.toml").write_text(config)
+
+    checks = run_checks(root, today=TODAY)
+    assert _statuses(checks)["profil demo"] == FAIL
+
+
 def test_doctor_reports_missing_config(tmp_path):
     checks = run_checks(make_root(tmp_path), today=TODAY)
     assert [check.status for check in checks] == [FAIL]

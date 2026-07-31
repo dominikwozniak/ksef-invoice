@@ -64,8 +64,10 @@ def _check_profile(config: Config, profile: Profile, today: date) -> list[Check]
             )
         ]
 
-    month = _probe_month(profile, today)
     try:
+        # Wybór miesiąca też czyta issue_day, więc musi być pod tym samym try —
+        # zepsute issue_day ("foo", 0) ma dać FAIL, a nie wywalić całą diagnostykę.
+        month = _probe_month(profile, today)
         invoice = build_invoice(
             month,
             [Decimal("1.00")] * count,
