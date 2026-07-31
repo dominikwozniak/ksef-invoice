@@ -9,10 +9,36 @@ authors = [
     { name = "Dominik Woźniak" }
 ]
 requires-python = ">=3.12"
+keywords = ["ksef", "faktura", "invoice", "fa3", "e-invoicing", "poland"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Natural Language :: Polish",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Accounting",
+]
+# lxml i rich są importowane wprost (invoice.py, templatize.py, cli.py) — dotąd wchodziły
+# tylko tranzytywnie przez signxml i typera, więc każdy ich bump mógł urwać nam import.
 dependencies = [
-    "ksef2[pdf]>=0.18.1",
+    "ksef2>=0.18.1",
+    "lxml>=6.0",
+    "rich>=13",
     "typer>=0.27.0",
 ]
+
+# PDF jest opcjonalny, bo WeasyPrint wymaga bibliotek natywnych (pango), których nie da
+# się zainstalować pipem. Domyślna instalacja ma zero zależności systemowych; bez tego
+# extra `render`/`send` zapisują sam invoice.html (patrz visualize.to_pdf).
+[project.optional-dependencies]
+pdf = ["ksef2[pdf]>=0.18.1"]
+
+[project.urls]
+Homepage = "https://github.com/dominikwozniak/ksef-invoice"
+Repository = "https://github.com/dominikwozniak/ksef-invoice"
+Issues = "https://github.com/dominikwozniak/ksef-invoice/issues"
 
 [project.scripts]
 ksef-invoice = "ksef_invoice.cli:app"
