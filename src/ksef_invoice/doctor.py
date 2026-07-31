@@ -7,17 +7,16 @@ dotyka KSeF; token raportujemy wyłącznie jako obecny/nieobecny, nigdy jego war
 from __future__ import annotations
 
 import re
-import sys
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 from .config import PROJECT_ROOT, Config, Profile, load_config
-from .invoice import build_invoice, check_seller_nip, validate_fa3
+from .invoice import build_invoice, check_seller_nip, issue_date_for, validate_fa3
 from .ledger import Ledger
 from .onboard import nip_checksum_ok, suspicious_nip_warning
-from .visualize import to_pdf
+from .visualize import PDF_HINT, to_pdf
 
 LINE_PLACEHOLDER = re.compile(r"\{\{line(\d+)_net\}\}")
 
@@ -37,8 +36,22 @@ def line_count(template_path: Path) -> int:
     return len({int(match) for match in LINE_PLACEHOLDER.findall(text)})
 
 
+def _probe_month(profile: Profile, today: date) -> str:
+    """Miesiąc próbnego renderu: bieżący, a gdy data wystawienia z profilu jeszcze w nim
+    nie nadeszła (issue_day = "last" albo dzień późniejszy niż dzisiejszy) — poprzedni.
+
+    Bez tego poprawnie skonfigurowany profil z issue_day = "last" świeciłby na czerwono
+    przez cały miesiąc poza jego ostatnim dniem, bo build_invoice słusznie odrzuca P_1
+    z przyszłości.
+    """
+    if issue_date_for(profile, today.year, today.month, today) <= today:
+        return f"{today.year:04d}-{today.month:02d}"
+    previous = date(today.year, today.month, 1) - timedelta(days=1)
+    return f"{previous.year:04d}-{previous.month:02d}"
+
+
 def _check_profile(config: Config, profile: Profile, today: date) -> list[Check]:
-    """Próbny render profilu: XSD + zgodność NIP-u, na kwotach 1.00 za bieżący miesiąc."""
+    """Próbny render profilu: XSD + zgodność NIP-u, na kwotach 1.00 za możliwy miesiąc."""
     label = f"profil {profile.name}"
     count = line_count(profile.template_path)
     if count == 0:
@@ -51,7 +64,7 @@ def _check_profile(config: Config, profile: Profile, today: date) -> list[Check]
             )
         ]
 
-    month = f"{today.year:04d}-{today.month:02d}"
+    month = _probe_month(profile, today)
     try:
         invoice = build_invoice(
             month,
@@ -134,10 +147,9 @@ def run_checks(root: Path = PROJECT_ROOT, today: date | None = None) -> list[Che
     elif to_pdf(probe) is not None:
         checks.append(Check("PDF", OK, "WeasyPrint działa — powstaje invoice.pdf"))
     else:
-        detail = "brak WeasyPrint — powstaje sam HTML (macOS: brew install pango)"
-        if sys.platform == "darwin":
-            detail += " + export DYLD_LIBRARY_PATH=/opt/homebrew/lib"
-        checks.append(Check("PDF", WARN, detail))
+        checks.append(
+            Check("PDF", WARN, f"brak bibliotek natywnych WeasyPrint — powstaje sam HTML. {PDF_HINT}")
+        )
     return checks
 
 
@@ -149,12 +161,12 @@ def _probe_xml(config: Config, today: date) -> bytes | None:
             if not count:
                 continue
             return build_invoice(
-                f"{today.year:04d}-{today.month:02d}",
+                _probe_month(profile, today),
                 [Decimal("1.00")] * count,
                 profile,
                 number="FS/1/2026",
                 today=today,
             ).xml
-        except Exception:  # noqa: BLE001,S112 — profil zepsuty zgłosi już _check_profile
+        except Exception:  # noqa: BLE001 — profil zepsuty zgłosi już _check_profile
             continue
     return None

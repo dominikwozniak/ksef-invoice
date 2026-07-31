@@ -157,6 +157,33 @@ def test_append_profile_refuses_duplicate_name(tmp_path):
         append_profile(root, "klient", block)
     append_profile(root, "klient", block, force=True)  # z --force przechodzi
 
+    # --force ma podmienić blok, nie dopisać drugiego: duplikat tabeli to plik,
+    # którego tomllib nie zparsuje, więc padłaby każda kolejna komenda.
+    assert existing_profiles(root / "config.toml") == {"klient"}
+
+
+def test_force_replaces_profile_in_place(tmp_path):
+    root = make_root(tmp_path)
+    create_config(root, VALID_NIP)
+    append_profile(root, "a", profile_block("a", "examples/template.example.xml", "23", due_days=14))
+    append_profile(root, "b", profile_block("b", "examples/template.example.xml", "23", due_days=14))
+    append_profile(
+        root,
+        "a",
+        profile_block("a", "examples/template.example.xml", "np", due_day_next_month=15),
+        force=True,
+    )
+
+    config = load_config(root)
+    assert set(config.profiles) == {"a", "b"}
+    assert config.profiles["a"].vat_rate == "np"
+    assert config.profiles["a"].due_day_next_month == 15
+    assert config.profiles["a"].due_days is None
+    assert config.profiles["b"].due_days == 14  # sąsiedni profil nietknięty
+
+    # komentarze z szablonu config.toml przeżywają podmianę
+    assert "# NIP sprzedawcy" in (root / "config.toml").read_text(encoding="utf-8")
+
 
 def test_append_profile_requires_config(tmp_path):
     root = make_root(tmp_path)
@@ -192,6 +219,26 @@ def test_doctor_passes_on_healthy_setup(tmp_path):
     assert statuses["NIP sprzedawcy"] == WARN
     detail = next(check.detail for check in checks if check.name == "profil demo")
     assert "1× --net" in detail
+
+
+def test_doctor_accepts_issue_day_last_mid_month(tmp_path):
+    """issue_day = "last" nie może dawać FAIL przez cały miesiąc poza jego ostatnim dniem.
+
+    Próbny render za bieżący miesiąc wypadałby z datą wystawienia w przyszłości, którą
+    build_invoice słusznie odrzuca — doctor sonduje wtedy poprzedni miesiąc.
+    """
+    root = healthy_root(tmp_path)
+    config = (root / "config.toml").read_text().replace('issue_day = "today"', 'issue_day = "last"')
+    (root / "config.toml").write_text(config)
+
+    mid_month = date(2026, 7, 15)
+    checks = run_checks(root, today=mid_month)
+    assert _statuses(checks)["profil demo"] == OK
+    assert "2026-06" in next(check.detail for check in checks if check.name == "profil demo")
+
+    # w ostatnim dniu miesiąca sonduje już bieżący
+    checks = run_checks(root, today=date(2026, 7, 31))
+    assert "2026-07" in next(check.detail for check in checks if check.name == "profil demo")
 
 
 def test_doctor_reports_missing_config(tmp_path):

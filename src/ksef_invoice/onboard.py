@@ -144,17 +144,61 @@ def profile_block(
     return PROFILE_TEMPLATE.format(name=name, template=template, vat_rate=vat_rate, due_rule=due_rule)
 
 
+def _profile_block_span(lines: list[str], name: str) -> tuple[int, int] | None:
+    """Zakres linii bloku [profiles.<name>]: (początek, koniec wyłączny) albo None.
+
+    Blok sięga od nagłówka tabeli do następnego nagłówka albo końca pliku; do bloku
+    wliczamy też komentarze przyklejone nad nagłówkiem i jedną pustą linię-separator,
+    czyli dokładnie to, co dopisuje PROFILE_TEMPLATE.
+    """
+    headers = (f"[profiles.{name}]", f'[profiles."{name}"]')
+    start = next((index for index, line in enumerate(lines) if line.strip() in headers), None)
+    if start is None:
+        return None
+
+    end = start + 1
+    while end < len(lines) and not lines[end].lstrip().startswith("["):
+        end += 1
+
+    while start > 0 and lines[start - 1].lstrip().startswith("#"):
+        start -= 1
+    if start > 0 and not lines[start - 1].strip():
+        start -= 1
+    return start, end
+
+
+def replace_profile(text: str, name: str, block: str) -> str:
+    """Podmienia istniejący blok profilu na nowy.
+
+    Dopisanie drugiego `[profiles.<name>]` dałoby plik, którego `tomllib` nie zparsuje
+    („Cannot declare … twice"), czyli zepsułoby każdą kolejną komendę — stąd podmiana
+    w miejscu zamiast dopisania na koniec.
+    """
+    lines = text.splitlines(keepends=True)
+    span = _profile_block_span(lines, name)
+    if span is None:
+        raise ValueError(f"Nie znalazłem bloku [profiles.{name}] do podmiany.")
+    start, end = span
+    return "".join(lines[:start]) + block + "".join(lines[end:])
+
+
 def append_profile(root: Path, name: str, block: str, *, force: bool = False) -> Path:
-    """Dopisuje blok profilu do config.toml. Wymaga istniejącego configu i wolnej nazwy profilu."""
+    """Dopisuje blok profilu do config.toml (z `force` — podmienia istniejący).
+
+    Wymaga istniejącego configu i — bez `force` — wolnej nazwy profilu.
+    """
     target = root / "config.toml"
     if not target.exists():
         raise FileNotFoundError(f"Brak {target} — uruchom najpierw `ksef-invoice init --nip <NIP>`.")
-    if name in existing_profiles(target) and not force:
-        raise ValueError(
-            f"Profil {name!r} już jest w {target.name} — nie dopisuję drugiego. "
-            "Wybierz inną nazwę (--name) albo użyj --force."
-        )
     current = target.read_text(encoding="utf-8")
+    if name in existing_profiles(target):
+        if not force:
+            raise ValueError(
+                f"Profil {name!r} już jest w {target.name} — nie dopisuję drugiego. "
+                "Wybierz inną nazwę (--name) albo użyj --force."
+            )
+        target.write_text(replace_profile(current, name, block), encoding="utf-8")
+        return target
     separator = "" if current.endswith("\n") else "\n"
     target.write_text(current + separator + block, encoding="utf-8")
     return target

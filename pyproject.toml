@@ -12,6 +12,10 @@ requires-python = ">=3.12"
 dependencies = [
     "ksef2[pdf]>=0.18.1",
     "typer>=0.27.0",
+    # Importowane wprost, nie tylko przez ksef2/typer — deklarujemy jawnie,
+    # żeby zmiana zależności u nich nie wywaliła CLI przy starcie.
+    "lxml>=6.1.1",
+    "rich>=15.0.0",
 ]
 
 [project.scripts]
@@ -32,7 +36,7 @@ line-length = 110
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "UP", "B", "BLE"]
 
 # typer.Option/Argument w wartościach domyślnych to wzorzec Typera, nie błąd (B008).
 [tool.ruff.lint.flake8-bugbear]
