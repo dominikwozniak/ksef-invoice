@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from importlib.metadata import version as package_version
@@ -41,6 +41,18 @@ console = Console()
 err_console = Console(stderr=True, soft_wrap=True)
 
 
+HOME_HELP = "Katalog z config.toml, .env, templates/ i out/"
+
+
+@dataclass(frozen=True)
+class AppContext:
+    """Stan współdzielony przez komendy. Trzymany w ctx.obj, nie w module — stan modułu
+    przeżywa między wywołaniami CliRunner w jednym procesie pytesta i przecieka między
+    testami."""
+
+    home: Path
+
+
 def _version_callback(value: bool) -> None:
     if value:
         console.print(package_version("ksef-invoice"))
@@ -49,6 +61,8 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def _app(
+    ctx: typer.Context,
+    home: Path = typer.Option(PROJECT_ROOT, "--home", envvar="KSEF_INVOICE_HOME", help=HOME_HELP),
     show_version: bool = typer.Option(
         None,
         "--version",
@@ -57,7 +71,14 @@ def _app(
         help="Pokaż wersję i zakończ.",
     ),
 ) -> None:
-    pass
+    # Rozwiązywane tutaj, nigdy przy imporcie. envvar= daje udokumentowaną precedencję
+    # click-a (flaga > KSEF_INVOICE_HOME > default) i samo-dokumentuje zmienną w --help.
+    ctx.obj = AppContext(home=home.expanduser().resolve())
+
+
+def _home(ctx: typer.Context) -> Path:
+    """Katalog roboczy z ctx.obj. Osobna funkcja, żeby komendy nie znały struktury obiektu."""
+    return ctx.obj.home
 
 
 def _parse_nets(nets: list[str]) -> list[Decimal]:
@@ -152,13 +173,14 @@ NET_HELP = (
 
 @app.command()
 def render(
+    ctx: typer.Context,
     month: str = typer.Option(..., "--month", help="Miesiąc faktury, np. 2026-07"),
     net: list[str] = typer.Option(..., "--net", help=NET_HELP),
     profile: str = typer.Option(None, "--profile", help="Nazwa profilu z config.toml"),
     seq: int = typer.Option(None, "--seq", help="Wymuś numer w sekwencji (domyślnie: kolejny z ledgera)"),
 ) -> None:
     """Wygeneruj i zwaliduj XML faktury bez wysyłania (numer: przewidywany, bez rezerwacji)."""
-    config = load_config()
+    config = load_config(_home(ctx))
     selected = _resolve_profile(config, profile)
     ledger = Ledger(config.out_dir / "ledger.json")
     _, _, number = _allocate_number(config, ledger, month, seq)
@@ -178,6 +200,7 @@ def render(
 
 @app.command()
 def send(
+    ctx: typer.Context,
     month: str = typer.Option(..., "--month", help="Miesiąc faktury, np. 2026-07"),
     net: list[str] = typer.Option(..., "--net", help=NET_HELP),
     profile: str = typer.Option(None, "--profile", help="Nazwa profilu z config.toml"),
@@ -187,7 +210,7 @@ def send(
     force: bool = typer.Option(False, "--force", help="Wyślij mimo istniejącego wpisu w ledgerze."),
 ) -> None:
     """Wygeneruj, zwaliduj i wyślij fakturę do KSeF; zapisz numer KSeF i UPO."""
-    config = load_config()
+    config = load_config(_home(ctx))
     if prod:
         config = Config(**{**config.__dict__, "environment": "prod"})
     selected = _resolve_profile(config, profile)
@@ -279,12 +302,13 @@ def send(
 
 @app.command()
 def pdf(
+    ctx: typer.Context,
     month: str = typer.Option(..., "--month", help="Miesiąc faktury, np. 2026-07"),
     profile: str = typer.Option(None, "--profile", help="Nazwa profilu z config.toml"),
     prod: bool = typer.Option(False, "--prod", help="Faktura produkcyjna."),
 ) -> None:
     """Wygeneruj HTML+PDF dla już zapisanej faktury z out/ (np. wysłanej wcześniej)."""
-    config = load_config()
+    config = load_config(_home(ctx))
     selected = _resolve_profile(config, profile)
     environment = "prod" if prod else config.environment
     matches = sorted((config.out_dir / environment / selected.name).glob(f"{month}_*/invoice.xml"))
@@ -300,12 +324,13 @@ def pdf(
 
 @app.command()
 def status(
+    ctx: typer.Context,
     month: str = typer.Option(..., "--month", help="Miesiąc faktury, np. 2026-07"),
     profile: str = typer.Option(None, "--profile", help="Nazwa profilu z config.toml"),
     prod: bool = typer.Option(False, "--prod", help="Sprawdź wpis produkcyjny."),
 ) -> None:
     """Pokaż zapisany status faktury za dany miesiąc (z lokalnego ledgera)."""
-    config = load_config()
+    config = load_config(_home(ctx))
     selected = _resolve_profile(config, profile)
     environment = "prod" if prod else config.environment
     entry = Ledger(config.out_dir / "ledger.json").get(environment, selected.name, month)
@@ -326,6 +351,7 @@ def _template_ref(target: Path, root: Path) -> str:
 
 @app.command()
 def templatize(
+    ctx: typer.Context,
     input_xml: Path = typer.Argument(..., help="XML faktury FA(3) pobrany z KSeF (Aplikacja Podatnika)"),
     name: str = typer.Option(None, "--name", help="Nazwa profilu; bez --out zapisze do templates/<name>.xml"),
     out: Path = typer.Option(None, "--out", help="Ścieżka wyjściowego szablonu (domyślnie stdout)"),
@@ -343,6 +369,7 @@ def templatize(
     force: bool = typer.Option(False, "--force", help="Nadpisz profil o tej nazwie w config.toml"),
 ) -> None:
     """Zrób szablon z placeholderami z pobranej faktury (onboarding nowego profilu)."""
+    home = _home(ctx)
     if write_config:
         if not name:
             raise typer.BadParameter("--write-config wymaga --name (to nazwa sekcji [profiles.<name>]).")
@@ -358,7 +385,10 @@ def templatize(
         err_console.print(f"[red]Nie udało się przetworzyć {input_xml}:[/] {error}")
         raise typer.Exit(code=1) from None
 
-    target = out or (Path("templates") / f"{name}.xml" if name else None)
+    # Względem home, nie cwd: config.py składa ścieżkę szablonu jako `home / template`,
+    # więc szablon zapisany względem katalogu roboczego dawał profil, którego load_config
+    # nie znajdzie — a komenda i tak raportowała sukces.
+    target = out or (home / "templates" / f"{name}.xml" if name else None)
     if target is not None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(result.xml)
@@ -372,9 +402,7 @@ def templatize(
         err_console.print(f"[yellow]⚠ {warning}[/]")
 
     profile_name = name or "moj-profil"
-    template_ref = (
-        _template_ref(target, PROJECT_ROOT) if target is not None else f"templates/{profile_name}.xml"
-    )
+    template_ref = _template_ref(target, home) if target is not None else f"templates/{profile_name}.xml"
 
     if not write_config:
         console.print("\nDopisz profil do [bold]config.toml[/] (uzupełnij regułę terminu płatności):")
@@ -397,7 +425,7 @@ def templatize(
         due_day_next_month=due_day_next_month,
     )
     try:
-        config_path = append_profile(PROJECT_ROOT, name, block, force=force)
+        config_path = append_profile(home, name, block, force=force)
     except (FileNotFoundError, ValueError) as error:
         err_console.print(f"[red]{error}[/]")
         raise typer.Exit(code=1) from None
@@ -415,13 +443,15 @@ def templatize(
 
 @app.command()
 def init(
+    ctx: typer.Context,
     nip: str = typer.Option(..., "--nip", help="NIP sprzedawcy (10 cyfr; dozwolone separatory i prefiks PL)"),
     force: bool = typer.Option(False, "--force", help="Nadpisz istniejące config.toml / .env"),
 ) -> None:
     """Utwórz config.toml i .env. Profile dopisuje potem `templatize --write-config`."""
+    home = _home(ctx)
     try:
-        config_path = create_config(PROJECT_ROOT, nip, force=force)
-        env_path = create_env(PROJECT_ROOT, force=force)
+        config_path = create_config(home, nip, force=force)
+        env_path = create_env(home, force=force)
     except (FileExistsError, FileNotFoundError, ValueError) as error:
         err_console.print(f"[red]{error}[/]")
         raise typer.Exit(code=1) from None
@@ -442,16 +472,18 @@ def init(
 
 @app.command()
 def doctor(
+    ctx: typer.Context,
     as_json: bool = typer.Option(False, "--json", help="Wypisz wynik jako JSON (dla skryptów)."),
 ) -> None:
     """Sprawdź spójność setupu (config, profile, szablony, token, licznik) — nic nie wysyła."""
-    checks = run_checks()
+    home = _home(ctx)
+    checks = run_checks(home)
     failed = [check for check in checks if check.status == FAIL]
 
     if as_json:
         # Świadomie bez rich: kontrakt maszynowy nie może zależeć od szerokości terminala.
         payload = {
-            "home": str(PROJECT_ROOT),
+            "home": str(home),
             "checks": [asdict(check) for check in checks],
             "failed": len(failed),
         }
@@ -460,6 +492,10 @@ def doctor(
             raise typer.Exit(code=1)
         return
 
+    # Katalog poza tabelą i z soft_wrap: kolumna rich-a obcina długie ścieżki wielokropkiem,
+    # a przy trzech źródłach rozwiązania (flaga, KSEF_INVOICE_HOME, default) każde pytanie
+    # o pomoc zaczyna się od „gdzie ono w ogóle szuka?".
+    console.print(f"Katalog: [bold]{home}[/]", soft_wrap=True)
     symbols = {OK: "[green]✅[/]", WARN: "[yellow]⚠[/]", FAIL: "[red]❌[/]"}
     table = Table(title="Diagnostyka setupu", show_header=False)
     for check in checks:

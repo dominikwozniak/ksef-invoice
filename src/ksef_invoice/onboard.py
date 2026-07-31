@@ -33,6 +33,21 @@ issue_day = "today"
 #   uv run ksef-invoice templatize <faktura.xml> --name <profil> --write-config --due-days 14
 """
 
+# Wzorzec .env trzymamy w kodzie, nie w examples/ — examples/ leży poza src/, więc nie ma
+# go w wheelu i `init` po instalacji wywalał się na FileNotFoundError. Symetrycznie do
+# CONFIG_TEMPLATE powyżej. examples/.env.example zostaje w repo jako dokumentacja czytelna
+# na GitHubie; test_onboarding pilnuje, że oba pliki się nie rozjadą.
+ENV_TEMPLATE = """\
+# Skopiuj do .env i uzupełnij.
+# Środowisko: test (domyślne) | demo | prod
+KSEF_ENV=test
+
+# Token KSeF — wymagany tylko dla demo/prod.
+# Generowanie: zaloguj się do Aplikacji Podatnika KSeF (https://ksef.mf.gov.pl)
+# profilem zaufanym, kontekst NIP, wygeneruj token z uprawnieniem do wystawiania faktur.
+KSEF_TOKEN=
+"""
+
 PROFILE_TEMPLATE = """\
 
 # Profil dopisany przez `templatize --write-config`.
@@ -95,6 +110,18 @@ def config_nip(config_path: Path) -> str | None:
     return str(value) if value is not None else None
 
 
+def ensure_home(root: Path) -> None:
+    """Tworzy katalog roboczy, jeśli go nie ma. 0700, bo obok config.toml leży .env
+    z produkcyjnym tokenem KSeF — ta sama konwencja co ~/.ssh i ~/.aws.
+
+    chmod po mkdir, a nie mode= w mkdir, bo mode jest modyfikowane przez umask.
+    Katalog, który już istnieje, zostawiamy z uprawnieniami nadanymi przez użytkownika.
+    """
+    if not root.exists():
+        root.mkdir(parents=True, exist_ok=True)
+        root.chmod(0o700)
+
+
 def create_config(root: Path, nip: str, *, force: bool = False) -> Path:
     """Zapisuje config.toml bez profili. Nie nadpisuje istniejącego pliku bez force."""
     target = root / "config.toml"
@@ -103,23 +130,26 @@ def create_config(root: Path, nip: str, *, force: bool = False) -> Path:
             f"{target} już istnieje — nie nadpisuję (zawiera Twoje dane). "
             "Użyj --force, jeśli chcesz zacząć od zera."
         )
-    target.write_text(CONFIG_TEMPLATE.format(nip=validate_nip(nip)), encoding="utf-8")
+    # Walidacja NIP-u przed utworzeniem katalogu — literówka nie ma zostawiać po sobie śmieci.
+    content = CONFIG_TEMPLATE.format(nip=validate_nip(nip))
+    ensure_home(root)
+    target.write_text(content, encoding="utf-8")
     return target
 
 
 def create_env(root: Path, *, force: bool = False) -> Path:
-    """Zapisuje .env na podstawie examples/.env.example. Nie nadpisuje bez force —
-    w istniejącym pliku może siedzieć produkcyjny token."""
+    """Zapisuje .env z ENV_TEMPLATE. Nie nadpisuje bez force — w istniejącym pliku
+    może siedzieć produkcyjny token."""
     target = root / ".env"
     if target.exists() and not force:
         raise FileExistsError(
             f"{target} już istnieje — nie nadpisuję (może zawierać token KSeF). "
             "Użyj --force, jeśli wiesz co robisz."
         )
-    example = root / "examples" / ".env.example"
-    if not example.exists():
-        raise FileNotFoundError(f"Brak wzorca {example} — nie mam z czego utworzyć .env.")
-    target.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+    ensure_home(root)
+    target.write_text(ENV_TEMPLATE, encoding="utf-8")
+    # Token KSeF to hasło — 0600 jak ~/.ssh/id_rsa, nie domyślne 0644.
+    target.chmod(0o600)
     return target
 
 

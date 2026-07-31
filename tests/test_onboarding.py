@@ -75,6 +75,25 @@ def test_create_config_refuses_overwrite(tmp_path):
     assert config_nip(root / "config.toml") == VALID_NIP
 
 
+def test_env_template_matches_committed_example():
+    """ENV_TEMPLATE żyje w kodzie (examples/ nie ma w wheelu), a examples/.env.example
+    zostaje jako dokumentacja na GitHubie — ten test pilnuje, że się nie rozjadą."""
+    from support import REPO_ROOT
+
+    from ksef_invoice.onboard import ENV_TEMPLATE
+
+    assert ENV_TEMPLATE == (REPO_ROOT / "examples" / ".env.example").read_text(encoding="utf-8")
+
+
+def test_create_env_writes_without_examples_directory(tmp_path):
+    """Regresja: create_env czytał examples/.env.example w runtime, a examples/ leży poza
+    src/, więc nie ma go w wheelu — `init` po instalacji wywalał się na FileNotFoundError."""
+    env_path = create_env(tmp_path)
+
+    assert not (tmp_path / "examples").exists()
+    assert "KSEF_ENV=test" in env_path.read_text()
+
+
 def test_create_env_refuses_overwrite(tmp_path):
     """Najważniejszy test bezpieczeństwa: .env może zawierać produkcyjny token."""
     root = make_root(tmp_path)
