@@ -7,8 +7,6 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
 ENVIRONMENTS = ("test", "demo", "prod")
 
 
@@ -62,15 +60,14 @@ def _resolve_due_rule(name: str, profile_data: dict, data: dict) -> tuple[int | 
     )
 
 
-def load_config(root: Path = PROJECT_ROOT) -> Config:
+def load_config(root: Path) -> Config:
+    """Wczytuje config z katalogu roboczego. `root` jest wymagany celowo — dopóki miał
+    default wskazujący na drzewo źródeł, zły katalog dawał się wyrazić przez pomyłkę."""
     _load_dotenv(root / ".env")
 
     config_path = root / "config.toml"
     if not config_path.exists():
-        raise FileNotFoundError(
-            f"Brak {config_path}. Utwórz go komendą `ksef-invoice init --nip <NIP>` "
-            "(albo skopiuj examples/config.example.toml i uzupełnij ręcznie)."
-        )
+        raise FileNotFoundError(f"Brak {config_path}. Utwórz go komendą `ksef-invoice init --nip <NIP>`.")
     data = tomllib.loads(config_path.read_text())
 
     profiles_data = data.get("profiles")

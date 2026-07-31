@@ -16,9 +16,21 @@ import ksef_invoice.send as send_module
 
 
 def test_ksef_env_is_stripped_inside_tests():
-    """Token produkcyjny z shella dewelopera nie ma prawa być widoczny w teście."""
-    leaked = [key for key in os.environ if key.startswith("KSEF_")]
+    """Token produkcyjny z shella dewelopera nie ma prawa być widoczny w teście.
+
+    KSEF_INVOICE_HOME jest wyjątkiem — ustawia go celowo fixture isolated_home.
+    """
+    leaked = [key for key in os.environ if key.startswith("KSEF_") and key != "KSEF_INVOICE_HOME"]
     assert not leaked, f"KSEF_* przeciekło do testu: {leaked}"
+
+
+def test_home_never_points_at_the_real_one(isolated_home, tmp_path):
+    """Komenda bez --home musi trafiać w tmp, nie w produkcyjne ~/.ksef-invoice."""
+    from pathlib import Path
+
+    assert os.environ["KSEF_INVOICE_HOME"] == str(isolated_home)
+    assert tmp_path in isolated_home.parents
+    assert isolated_home != Path.home() / ".ksef-invoice"
 
 
 @pytest.mark.parametrize("module", [cli_module, send_module])

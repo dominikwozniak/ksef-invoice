@@ -13,7 +13,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from .config import PROJECT_ROOT, Config, Profile, load_config
+from .config import Config, Profile, load_config
 from .invoice import build_invoice, check_seller_nip, validate_fa3
 from .ledger import Ledger
 from .onboard import nip_checksum_ok, suspicious_nip_warning
@@ -76,7 +76,25 @@ def _check_profile(config: Config, profile: Profile, today: date) -> list[Check]
     ]
 
 
-def run_checks(root: Path = PROJECT_ROOT, today: date | None = None) -> list[Check]:
+def _legacy_layout_hint(root: Path) -> Check | None:
+    """Stary układ (stan trzymany w klonie repo) wykryty w katalogu roboczym shella.
+
+    Sama podpowiedź, świadomie — przenoszenia kod nie robi. Połowicznie wykonana
+    migracja out/ledger.json to dokładnie ta awaria, która duplikuje numer faktury.
+    """
+    legacy = Path.cwd()
+    if legacy == root or not (legacy / "config.toml").exists():
+        return None
+    return Check(
+        "migracja",
+        WARN,
+        f"config.toml leży w {legacy}, a szukam go w {root}. Przenieś stan: "
+        f"cp -a config.toml .env templates out {root}/ (cp, nie mv — potem sprawdź, "
+        "czy licznik jest ten sam, i dopiero wtedy usuń kopie).",
+    )
+
+
+def run_checks(root: Path, today: date | None = None) -> list[Check]:
     """Wszystkie checki po kolei; pierwszy blokujący (brak configu) przerywa dalsze."""
     today = today or date.today()
     checks: list[Check] = []
@@ -84,7 +102,11 @@ def run_checks(root: Path = PROJECT_ROOT, today: date | None = None) -> list[Che
     try:
         config = load_config(root)
     except Exception as error:  # noqa: BLE001 — komunikaty load_config są celowo instruktażowe
-        return [Check("config.toml", FAIL, str(error).replace("\n", " ")[:300])]
+        checks.append(Check("config.toml", FAIL, str(error).replace("\n", " ")[:300]))
+        hint = _legacy_layout_hint(root)
+        if hint:
+            checks.append(hint)
+        return checks
 
     checks.append(Check("config.toml", OK, f"wczytany, {len(config.profiles)} profil(e)"))
 

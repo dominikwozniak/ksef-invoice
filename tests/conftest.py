@@ -46,6 +46,18 @@ def clean_ksef_env():
 
 
 @pytest.fixture(autouse=True)
+def isolated_home(tmp_path, monkeypatch, clean_ksef_env):
+    """Kieruje KSEF_INVOICE_HOME w tmp_path, żeby żaden test nie trafił w prawdziwe
+    ~/.ksef-invoice. Od kiedy to jest domyślny katalog, komenda bez --home czytałaby
+    produkcyjny config i ledger. Zależność od clean_ksef_env wymusza kolejność:
+    najpierw zdejmij KSEF_*, potem ustaw ten jeden.
+    """
+    home = tmp_path / "ksef-home"
+    monkeypatch.setenv("KSEF_INVOICE_HOME", str(home))
+    return home
+
+
+@pytest.fixture(autouse=True)
 def _no_send(monkeypatch):
     """Blokuje wysyłkę do KSeF. Test, który jej potrzebuje, nadpisuje to własnym stubem."""
 

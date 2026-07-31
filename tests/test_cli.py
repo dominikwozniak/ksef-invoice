@@ -302,6 +302,43 @@ def test_home_flag_beats_env_var(tmp_path, monkeypatch):
     assert payload["home"] == str(from_flag)
 
 
+def test_default_home_is_one_per_user_directory():
+    """Świadomie NIE szukanie config.toml w górę od cwd: numer faktury to roczna sekwencja
+    z out/ledger.json i nie może zależeć od katalogu, w którym stoi shell."""
+    assert cli.DEFAULT_HOME == Path.home() / ".ksef-invoice"
+
+
+def test_help_documents_default_home_and_env_var():
+    result = CliRunner().invoke(app, ["--help"])
+
+    assert "KSEF_INVOICE_HOME" in result.output
+    assert ".ksef-invoice" in result.output
+
+
+def test_doctor_hints_migration_when_state_sits_in_cwd(tmp_path, monkeypatch):
+    """Po przestawieniu defaultu użytkownik ze stanem w klonie repo musi dostać przepis,
+    a nie samo „brak config.toml"."""
+    legacy = tmp_path / "stary-klon"
+    legacy.mkdir()
+    (legacy / "config.toml").write_text('nip = "1111111111"\n')
+    monkeypatch.chdir(legacy)
+
+    payload = json.loads(_run(["doctor", "--json"], home=tmp_path / "nowy").stdout)
+
+    hint = next(check for check in payload["checks"] if check["name"] == "migracja")
+    assert "cp -a" in hint["detail"]
+    assert str(legacy) in hint["detail"]
+    assert "cp, nie mv" in hint["detail"]
+
+
+def test_doctor_does_not_hint_migration_on_healthy_home(tmp_path):
+    home = _ready_home(tmp_path)
+
+    payload = json.loads(_run(["doctor", "--json"], home=home).stdout)
+
+    assert "migracja" not in [check["name"] for check in payload["checks"]]
+
+
 def test_env_var_is_used_when_flag_absent(tmp_path, monkeypatch):
     home = tmp_path / "z-env"
     home.mkdir()

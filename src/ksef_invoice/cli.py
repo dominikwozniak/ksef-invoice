@@ -14,7 +14,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import PROJECT_ROOT, Config, Profile, load_config
+from .config import Config, Profile, load_config
 from .doctor import FAIL, OK, WARN, run_checks
 from .invoice import Invoice, build_invoice, check_seller_nip, format_number, validate_fa3
 from .ledger import Ledger
@@ -23,6 +23,7 @@ from .onboard import (
     config_nip,
     create_config,
     create_env,
+    ensure_home,
     profile_block,
     suspicious_nip_warning,
 )
@@ -41,7 +42,12 @@ console = Console()
 err_console = Console(stderr=True, soft_wrap=True)
 
 
-HOME_HELP = "Katalog z config.toml, .env, templates/ i out/"
+# Jeden katalog per użytkownik, jak ~/.aws czy ~/.ssh — a nie szukanie w górę od cwd.
+# Numer faktury to roczna sekwencja z out/ledger.json i nie może zależeć od tego, w którym
+# katalogu stoi shell: znaleziony gdzie indziej pusty ledger wystartowałby numerację od 1.
+DEFAULT_HOME = Path.home() / ".ksef-invoice"
+
+HOME_HELP = "Katalog z config.toml, .env, templates/ i out/ (domyślnie ~/.ksef-invoice)"
 
 
 @dataclass(frozen=True)
@@ -62,7 +68,7 @@ def _version_callback(value: bool) -> None:
 @app.callback()
 def _app(
     ctx: typer.Context,
-    home: Path = typer.Option(PROJECT_ROOT, "--home", envvar="KSEF_INVOICE_HOME", help=HOME_HELP),
+    home: Path = typer.Option(DEFAULT_HOME, "--home", envvar="KSEF_INVOICE_HOME", help=HOME_HELP),
     show_version: bool = typer.Option(
         None,
         "--version",
@@ -393,6 +399,7 @@ def templatize(
     # nie znajdzie — a komenda i tak raportowała sukces.
     target = out or (home / "templates" / f"{name}.xml" if name else None)
     if target is not None:
+        ensure_home(home)  # 0700 — w templates/ leżą dane kontrahentów
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(result.xml)
         console.print(
