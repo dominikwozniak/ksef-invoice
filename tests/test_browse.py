@@ -9,7 +9,13 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 
-from ksef_invoice.browse import gross_total, invoice_dirs, invoice_rows, ledger_profiles
+from ksef_invoice.browse import (
+    artifact_dir_name,
+    gross_total,
+    invoice_dirs,
+    invoice_rows,
+    ledger_profiles,
+)
 from ksef_invoice.config import Config, Profile
 from ksef_invoice.ledger import Ledger
 
@@ -177,6 +183,68 @@ def test_directory_points_at_existing_artifacts(tmp_path):
     (row,) = invoice_rows(config, "test")
 
     assert row.directory == expected
+
+
+def test_directory_belongs_to_the_entry_after_force(tmp_path):
+    """Po `send --force` w out/ leżą dwa katalogi, a w ledgerze zostaje tylko nowszy wpis
+    (record nadpisuje klucz miesiąca). Wiersz musi wskazywać katalog SWOJEJ faktury —
+    inaczej `list --json` paruje metadane jednej faktury ze ścieżką drugiej."""
+    config = _config(tmp_path, "klient")
+    _artifacts(config, "test", "klient", "2026-07", "FS/8/2026")
+    _record(config, "test", "klient", "2026-07", 8)
+    forced = _artifacts(config, "test", "klient", "2026-07", "FS/9/2026")
+    _record(config, "test", "klient", "2026-07", 9)
+
+    (row,) = invoice_rows(config, "test")
+
+    assert row.number == "FS/9/2026"
+    assert row.directory == forced
+
+
+def test_directory_is_not_picked_by_sort_order(tmp_path):
+    """Kontrola dla testu powyżej: przy FS/9 i FS/10 najstarszy katalog jest leksykograficznie
+    drugi, więc wybór „pierwszy z globa" trafiał tu poprawnie przez przypadek. Bez tego testu
+    poprawka dałaby się cofnąć w połowie przypadków bez czerwonego testu."""
+    config = _config(tmp_path, "klient")
+    ninth = _artifacts(config, "test", "klient", "2026-07", "FS/9/2026")
+    _artifacts(config, "test", "klient", "2026-07", "FS/10/2026")
+    _record(config, "test", "klient", "2026-07", 9)
+
+    (row,) = invoice_rows(config, "test")
+
+    assert row.directory == ninth
+
+
+def test_directory_is_none_when_only_another_invoices_dir_survives(tmp_path):
+    """Katalog innej faktury tego miesiąca nie jest zamiennikiem: ścieżka wskazująca cudzą
+    fakturę jest gorsza niż jej brak, bo w skrypcie wygląda na poprawną."""
+    config = _config(tmp_path, "klient")
+    _artifacts(config, "test", "klient", "2026-07", "FS/8/2026")
+    _record(config, "test", "klient", "2026-07", 9)
+
+    (row,) = invoice_rows(config, "test")
+
+    assert row.directory is None
+
+
+def test_directory_is_none_for_an_entry_without_a_number(tmp_path):
+    """Bez numeru nie ma z czego złożyć nazwy katalogu — i tak wtedy kolumna `numer`
+    pokazuje `—`, więc `pliki` też."""
+    config = _config(tmp_path, "klient")
+    Ledger(config.out_dir / "ledger.json").record("test", "klient", "2026-07", 1, 2026, {"seq": 1})
+    _artifacts(config, "test", "klient", "2026-07", "FS/1/2026")
+
+    (row,) = invoice_rows(config, "test")
+
+    assert (row.number, row.directory) == (None, None)
+
+
+def test_artifact_dir_name_keeps_the_number_readable(tmp_path):
+    """Ukośnik nie może wejść do nazwy katalogu (zrobiłby zagnieżdżenie), spacja psuje
+    podstawienie w shellu. Ta funkcja jest jedyną regułą — sprawdzoną po obu stronach
+    w test_cli.test_invoice_dir_uses_the_shared_artifact_dir_name."""
+    assert artifact_dir_name("2026-07", "FS/8/2026") == "2026-07_FS-8-2026"
+    assert artifact_dir_name("2026-07", "FS 8 2026") == "2026-07_FS_8_2026"
 
 
 def test_invoice_dirs_returns_every_directory_for_a_month(tmp_path):

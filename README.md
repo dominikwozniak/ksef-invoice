@@ -247,9 +247,15 @@ open $(ksef-invoice path --month 2026-07 --prod)/invoice.pdf   # --profile zbęd
 ```
 
 `list` czyta **lokalny rejestr**, nie KSeF — pokazuje numer, który przydzieliło to narzędzie,
-i działa offline. Kolumna `pliki` mówi, czy artefakty faktury nadal leżą w `out/`; `—` po
-migracji znaczy, że ledger został skopiowany bez `out/`. Tabela świadomie nie ma numeru KSeF
-ani ścieżki — pełne dane daje `--json`, a jedną fakturę `status --month`.
+i działa offline. Kolumna `pliki` mówi, czy w `out/` nadal leżą artefakty **tej konkretnej**
+faktury (katalog o jej numerze, nie jakikolwiek katalog tego miesiąca); `—` po migracji znaczy,
+że ledger został skopiowany bez `out/`. Tabela świadomie nie ma numeru KSeF ani ścieżki —
+pełne dane daje `--json`, a jedną fakturę `status --month`.
+
+W `--profile` komend przeglądania (`list`, `path`, `status`, `pdf`) możesz podać też profil,
+który jest już **tylko w historii** — usunięty z `config.toml`, ale z fakturami w rejestrze.
+Wystawianie (`render`, `send`) wymaga profilu z `config.toml`, bo bez niego nie ma szablonu
+ani stawki VAT.
 
 Odczyt wprost z KSeF (np. żeby zobaczyć faktury wystawione poza tym narzędziem) wymagałby
 tokenu z uprawnieniem **`invoice_read`** — w KSeF jest to zakres rozdzielny od `invoice_write`,

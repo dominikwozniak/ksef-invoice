@@ -41,11 +41,16 @@ ale ledger **nieaktualny** jest cichy i kończy się duplikatem numeru faktury.
   - `profiles` — profile z `config.toml` (ile kwot `--net`, VAT, reguła terminu, szablon).
     Bez próbnego renderu i walidacji XSD, które robi `doctor`, więc natychmiastowe.
   - `list` — wystawione faktury z `out/ledger.json`, z `--profile`, `--year` i `--prod`.
-    Kolumna `pliki` pokazuje, czy artefakty nadal leżą w `out/` — `—` po migracji znaczy
-    ledger skopiowany bez `out/`. Brak faktur to kod 0, nie błąd.
+    Kolumna `pliki` pokazuje, czy w `out/` leżą artefakty tej konkretnej faktury (katalog
+    o jej numerze) — `—` po migracji znaczy ledger skopiowany bez `out/`. Brak faktur to
+    kod 0, nie błąd.
   - `path` — katalog z artefaktami faktury, jedną linią przez `typer.echo`, żeby działało
     `open $(ksef-invoice path --month 2026-07)`. Wypisuje wszystkie katalogi miesiąca, bo
     po `send --force` bywa ich więcej niż jeden.
+
+  `--profile` w komendach przeglądania (`list`, `path`, `status`, `pdf`) przyjmuje też profil
+  obecny wyłącznie w rejestrze — usunięty z `config.toml`, ale z historią faktur. Wystawianie
+  (`render`, `send`) nadal wymaga profilu z konfiguracji: bez niego nie ma szablonu ani stawki.
 
   Wszystkie trzy są tylko do odczytu, nie dotykają sieci i nie potrzebują tokenu; `list`
   i `profiles` mają `--json`. Odczytu wprost z KSeF **nie ma** — wymagałby tokenu

@@ -18,6 +18,7 @@ import typer
 from typer.testing import CliRunner
 
 import ksef_invoice.cli as cli
+from ksef_invoice.browse import artifact_dir_name
 from ksef_invoice.cli import (
     _allocate_number,
     _invoice_dir,
@@ -179,6 +180,9 @@ def test_invoice_dir_sanitizes_number_into_one_segment(tmp_path):
 
     assert target == tmp_path / "test" / "klient" / "2026-07_FS-8-2026"
     assert target.relative_to(tmp_path).parts == ("test", "klient", "2026-07_FS-8-2026")
+    # Zapis (tu) i odczyt (`list` przez browse) muszą składać nazwę jedną regułą — rozjazd
+    # tych dwóch dawał w listingu ścieżkę innej faktury niż wpis, obok którego stała.
+    assert target.name == artifact_dir_name(invoice.month, invoice.number)
 
 
 # --- powierzchnia komend -----------------------------------------------------------
@@ -917,6 +921,67 @@ def test_path_lists_every_directory_after_force(tmp_path):
 
     assert len(lines) == 2
     assert all(Path(line).is_dir() for line in lines)
+
+
+def _historical_profile_home(tmp_path: Path) -> Path:
+    """Home, w którym `stary` ma fakturę w rejestrze, ale nie ma już sekcji w config.toml.
+    Realne po zakończeniu współpracy z klientem: konfigurację się porządkuje, historia zostaje."""
+    home = _ready_home(tmp_path)
+    _record_invoice(home, "test", "2026-07", 3, profile="stary")
+    return home
+
+
+@pytest.mark.parametrize("command", ["path", "status", "pdf"])
+def test_read_only_commands_accept_a_profile_only_in_the_ledger(tmp_path, command):
+    """`list` pokazuje ten profil i w stopce odsyła do `status` oraz `path` — obie muszą
+    zadziałać na tę samą nazwę. Odpowiedź „Nieznany profil" na profil, którego fakturę
+    narzędzie właśnie wypisało, jest wprost nieprawdziwa."""
+    home = _historical_profile_home(tmp_path)
+    directory = home / "out" / "test" / "stary" / "2026-07_FS-3-2026"
+    shutil.copy(Path(__file__).parent / "fixtures" / "two_lines.xml", directory / "invoice.xml")
+
+    listing = _run(["list"], home=home)
+    result = _run([command, "--profile", "stary", "--month", "2026-07"], home=home)
+
+    assert "stary" in listing.stdout
+    assert result.exit_code == 0, result.output
+
+
+def test_render_still_refuses_a_profile_only_in_the_ledger(tmp_path):
+    """Kontrola negatywna: rozluźnienie dotyczy tylko odczytu. Profil z historii nie ma
+    szablonu ani stawki VAT, więc na ścieżce wystawiania musi dalej odmawiać."""
+    home = _historical_profile_home(tmp_path)
+
+    result = _run(["render", "--profile", "stary", "--month", "2026-08", "--net", "1000"], home=home)
+
+    assert result.exit_code == 2
+    assert "Nieznany profil" in result.output
+
+
+def test_unknown_profile_is_still_a_parameter_error(tmp_path):
+    """Suma config+ledger nie może wpuścić literówki — „brak faktur" byłoby tu najgorszym
+    fałszywym negatywem, bo wygląda na poprawną odpowiedź."""
+    home = _historical_profile_home(tmp_path)
+
+    for command in (["list"], ["path", "--month", "2026-07"], ["status", "--month", "2026-07"]):
+        result = _run([*command, "--profile", "starry"], home=home)
+        assert result.exit_code == 2, (command, result.output)
+        assert "stary" in result.output, command
+
+
+def test_list_json_dir_belongs_to_the_invoice_in_the_same_row(tmp_path):
+    """Zarzut z review, end-to-end: po `--force` w out/ są dwa katalogi, a w rejestrze
+    jeden wpis. `dir` musi należeć do faktury z tego samego wiersza — skrypt podpinający
+    `$(jq -r .dir)/invoice.pdf` do maila załączyłby inaczej inną fakturę."""
+    home = _ready_home(tmp_path)
+    _record_invoice(home, "test", "2026-07", 8)
+    _record_invoice(home, "test", "2026-07", 9)
+
+    (invoice,) = json.loads(_run(["list", "--json"], home=home).stdout)["invoices"]
+
+    assert invoice["number"] == "FS/9/2026"
+    assert Path(invoice["dir"]).name == "2026-07_FS-9-2026"
+    assert Path(invoice["dir"]).is_dir()
 
 
 def test_path_and_pdf_agree_on_directories(tmp_path):

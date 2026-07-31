@@ -30,16 +30,40 @@ class InvoiceRow:
     ksef_number: str | None
     acquisition_date: str | None
     sent_at: str | None
-    # None = na dysku nie ma katalogu z artefaktami. Świadomie nie składamy ścieżki
-    # z numeru: nigdy nie pokazujemy ścieżki, której nie da się otworzyć. Ten stan
-    # oznacza zwykle ledger skopiowany bez out/, czyli połowicznie wykonaną migrację.
+    # Katalog artefaktów *tej* faktury albo None, gdy go na dysku nie ma. Nigdy katalog
+    # innej faktury tego miesiąca — patrz invoice_dir_for. Typowa przyczyna None to ledger
+    # skopiowany bez out/, czyli połowicznie wykonana migracja.
     directory: Path | None
+
+
+def artifact_dir_name(month: str, number: str) -> str:
+    """Nazwa katalogu z artefaktami — jedna reguła dla zapisu (`render`/`send`) i odczytu
+    (`list`). Ukośnik z numeru faktury zrobiłby zagnieżdżone katalogi, spacja psuje
+    podstawienie w shellu. Zapisu i odczytu nie da się tu rozjechać, bo to ta sama funkcja.
+    """
+    return f"{month}_{number.replace('/', '-').replace(' ', '_')}"
 
 
 def invoice_dirs(config: Config, environment: str, profile: str, month: str) -> list[Path]:
     """Katalogi z artefaktami faktury. Wiele wyników to realny stan po `send --force`."""
     base = config.out_dir / environment / profile
     return sorted(match for match in base.glob(f"{month}_*") if match.is_dir())
+
+
+def invoice_dir_for(
+    config: Config, environment: str, profile: str, month: str, number: str | None
+) -> Path | None:
+    """Katalog dokładnie tej faktury z rejestru, albo None, gdy go nie ma.
+
+    Świadomie bez fallbacku na inny katalog tego miesiąca: po `send --force` leżą tam dwie
+    faktury, a rejestr pamięta tylko jedną — ścieżka wskazująca cudzą fakturę jest gorsza
+    niż jej brak, bo w skrypcie wygląda na poprawną. `number is None` (wpisy ze starszej
+    wersji `meta`) też daje None: nie ma z czego złożyć nazwy.
+    """
+    if number is None:
+        return None
+    target = config.out_dir / environment / profile / artifact_dir_name(month, number)
+    return target if target.is_dir() else None
 
 
 def invoice_rows(
@@ -61,7 +85,6 @@ def invoice_rows(
             continue
         if year is not None and not month.startswith(f"{year}-"):
             continue
-        directories = invoice_dirs(config, environment, entry_profile, month)
         rows.append(
             InvoiceRow(
                 month=month,
@@ -74,7 +97,7 @@ def invoice_rows(
                 ksef_number=entry.get("ksef_number"),
                 acquisition_date=entry.get("acquisition_date"),
                 sent_at=entry.get("sent_at"),
-                directory=directories[0] if directories else None,
+                directory=invoice_dir_for(config, environment, entry_profile, month, entry.get("number")),
             )
         )
     return rows

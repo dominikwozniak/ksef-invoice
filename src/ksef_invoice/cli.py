@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from .browse import gross_total, invoice_dirs, invoice_rows, ledger_profiles
+from .browse import artifact_dir_name, gross_total, invoice_dirs, invoice_rows, ledger_profiles
 from .config import Config, Profile, load_config
 from .doctor import FAIL, OK, WARN, line_count, run_checks
 from .invoice import (
@@ -119,6 +119,32 @@ def _resolve_profile(config: Config, name: str | None) -> Profile:
     return config.profiles[name]
 
 
+def _known_profiles(config: Config, environment: str) -> set[str]:
+    """Nazwy z config.toml plus nazwy z rejestru. Rejestr jest historią: profil usunięty
+    z konfiguracji nadal ma wystawione faktury, których nie wolno schować."""
+    return set(config.profiles) | ledger_profiles(config, environment)
+
+
+def _resolve_profile_name(config: Config, environment: str, name: str | None) -> str:
+    """Nazwa profilu dla komend tylko do odczytu (`path`, `status`, `pdf`).
+
+    Nazwę podaną jawnie walidujemy sumą config.toml + rejestr: `list` pokazuje historię
+    profilu usuniętego z konfiguracji i odsyła w stopce do `status` oraz `path`, więc te
+    komendy nie mogą na tę samą nazwę odpowiadać „Nieznany profil". Ścieżka wystawiania
+    (`render`/`send`) zostaje przy `_resolve_profile` — bez sekcji w config.toml nie ma
+    szablonu ani stawki VAT, więc faktury i tak nie da się złożyć.
+
+    Brak nazwy zostaje przy autowyborze z config.toml: profile z samego rejestru w tej
+    sumie zmieniłyby zachowanie istniejących wywołań bez `--profile`.
+    """
+    if name is None:
+        return _resolve_profile(config, None).name
+    known = _known_profiles(config, environment)
+    if name not in known:
+        raise typer.BadParameter(f"Nieznany profil {name!r}. Dostępne: {', '.join(sorted(known))}")
+    return name
+
+
 def _allocate_number(config: Config, ledger: Ledger, month: str, seq: int | None) -> tuple[int, int, str]:
     """Zwraca (seq, year, numer) — seq z ledgera albo z flagi --seq."""
     # Parsujemy tym samym kodem co build_invoice, żeby zły --month dał komunikat,
@@ -132,8 +158,10 @@ def _allocate_number(config: Config, ledger: Ledger, month: str, seq: int | None
 
 
 def _invoice_dir(config: Config, profile: Profile, invoice: Invoice) -> Path:
-    safe_number = invoice.number.replace("/", "-").replace(" ", "_")
-    return config.out_dir / config.environment / profile.name / f"{invoice.month}_{safe_number}"
+    # Nazwa katalogu przez artifact_dir_name, bo `list` szuka po niej tej samej faktury —
+    # druga kopia tej reguły dawała w listingu ścieżkę innej faktury niż wpis obok niej.
+    name = artifact_dir_name(invoice.month, invoice.number)
+    return config.out_dir / config.environment / profile.name / name
 
 
 def _print_summary(config: Config, profile: Profile, invoice: Invoice) -> None:
@@ -203,6 +231,10 @@ def _write_visualizations(target: Path, xml: bytes) -> Path:
 NET_HELP = (
     "Kwota netto pozycji; powtórz dla kolejnych pozycji w kolejności z faktury, np. --net 1000 --net 500"
 )
+
+# Komendy tylko do odczytu przyjmują też profil obecny wyłącznie w rejestrze — inaczej
+# odmawiałyby profilu, którego fakturę `list` właśnie wypisał.
+PROFILE_READ_HELP = "Nazwa profilu z config.toml albo z historii w rejestrze"
 
 
 @app.command()
@@ -338,24 +370,22 @@ def send(
 def pdf(
     ctx: typer.Context,
     month: str = typer.Option(..., "--month", help="Miesiąc faktury, np. 2026-07"),
-    profile: str = typer.Option(None, "--profile", help="Nazwa profilu z config.toml"),
+    profile: str = typer.Option(None, "--profile", help=PROFILE_READ_HELP),
     prod: bool = typer.Option(False, "--prod", help="Faktura produkcyjna."),
 ) -> None:
     """Wygeneruj HTML+PDF dla już zapisanej faktury z out/ (np. wysłanej wcześniej)."""
     config = load_config(_home(ctx))
-    selected = _resolve_profile(config, profile)
     environment = "prod" if prod else config.environment
+    selected = _resolve_profile_name(config, environment, profile)
     # Ten sam glob co `path`, żeby obie komendy nie mogły się rozjechać co do tego,
     # które katalogi istnieją.
     matches = [
         directory / "invoice.xml"
-        for directory in invoice_dirs(config, environment, selected.name, month)
+        for directory in invoice_dirs(config, environment, selected, month)
         if (directory / "invoice.xml").exists()
     ]
     if not matches:
-        err_console.print(
-            f"[red]Brak zapisanej faktury {selected.name} za {month} ({environment}) w out/.[/]"
-        )
+        err_console.print(f"[red]Brak zapisanej faktury {selected} za {month} ({environment}) w out/.[/]")
         raise typer.Exit(code=1)
     for xml_path in matches:
         console.print(f"✅ {_write_visualizations(xml_path.parent, xml_path.read_bytes())}")
@@ -365,16 +395,16 @@ def pdf(
 def status(
     ctx: typer.Context,
     month: str = typer.Option(..., "--month", help="Miesiąc faktury, np. 2026-07"),
-    profile: str = typer.Option(None, "--profile", help="Nazwa profilu z config.toml"),
+    profile: str = typer.Option(None, "--profile", help=PROFILE_READ_HELP),
     prod: bool = typer.Option(False, "--prod", help="Sprawdź wpis produkcyjny."),
 ) -> None:
     """Pokaż zapisany status faktury za dany miesiąc (z lokalnego ledgera)."""
     config = load_config(_home(ctx))
-    selected = _resolve_profile(config, profile)
     environment = "prod" if prod else config.environment
-    entry = Ledger(config.out_dir / "ledger.json").get(environment, selected.name, month)
+    selected = _resolve_profile_name(config, environment, profile)
+    entry = Ledger(config.out_dir / "ledger.json").get(environment, selected, month)
     if not entry:
-        err_console.print(f"[red]Brak wpisu {selected.name} za {month} ({environment}).[/]")
+        err_console.print(f"[red]Brak wpisu {selected} za {month} ({environment}).[/]")
         raise typer.Exit(code=1)
     console.print_json(json.dumps(entry, ensure_ascii=False))
 
@@ -463,10 +493,11 @@ def list_invoices(
     environment = "prod" if prod else config.environment
 
     if profile is not None:
-        # Suma nazw z configu i z ledgera: profil usunięty z config.toml ma nadal
-        # historię, a literówka bez tej walidacji wygląda jak „brak faktur" — najgorszy
-        # fałszywy negatyw w narzędziu, w którym numeracja ma skutki prawne.
-        known = set(config.profiles) | ledger_profiles(config, environment)
+        # Walidujemy, ale nie przez _resolve_profile_name: tu brak --profile znaczy
+        # „wszystkie", nie autowybór jedynego profilu. Literówka bez tej walidacji wygląda
+        # jak „brak faktur" — najgorszy fałszywy negatyw w narzędziu, w którym numeracja
+        # ma skutki prawne.
+        known = _known_profiles(config, environment)
         if profile not in known:
             raise typer.BadParameter(f"Nieznany profil {profile!r}. Dostępne: {', '.join(sorted(known))}")
 
@@ -543,18 +574,16 @@ def list_invoices(
 def path(
     ctx: typer.Context,
     month: str = typer.Option(..., "--month", help="Miesiąc faktury, np. 2026-07"),
-    profile: str = typer.Option(None, "--profile", help="Nazwa profilu z config.toml"),
+    profile: str = typer.Option(None, "--profile", help=PROFILE_READ_HELP),
     prod: bool = typer.Option(False, "--prod", help="Faktura produkcyjna."),
 ) -> None:
     """Wypisz katalog z artefaktami faktury — do `open $(ksef-invoice path --month ...)`."""
     config = load_config(_home(ctx))
-    selected = _resolve_profile(config, profile)
     environment = "prod" if prod else config.environment
-    directories = invoice_dirs(config, environment, selected.name, month)
+    selected = _resolve_profile_name(config, environment, profile)
+    directories = invoice_dirs(config, environment, selected, month)
     if not directories:
-        err_console.print(
-            f"[red]Brak zapisanej faktury {selected.name} za {month} ({environment}) w out/.[/]"
-        )
+        err_console.print(f"[red]Brak zapisanej faktury {selected} za {month} ({environment}) w out/.[/]")
         raise typer.Exit(code=1)
     for directory in directories:
         # typer.echo, nie console.print: rich zawija do szerokości terminala i wstawiłby
