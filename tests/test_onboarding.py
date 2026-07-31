@@ -167,6 +167,15 @@ def test_force_replaces_profile_in_place(tmp_path):
     create_config(root, VALID_NIP)
     append_profile(root, "a", profile_block("a", "examples/template.example.xml", "23", due_days=14))
     append_profile(root, "b", profile_block("b", "examples/template.example.xml", "23", due_days=14))
+
+    # adnotacja użytkownika nad sąsiednim profilem — podmiana profilu `a` nie może jej ruszyć
+    config_path = root / "config.toml"
+    annotation = "# UWAGA: umowa z b wygasa 2027-01"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("[profiles.b]", f"{annotation}\n[profiles.b]"),
+        encoding="utf-8",
+    )
+
     append_profile(
         root,
         "a",
@@ -181,8 +190,11 @@ def test_force_replaces_profile_in_place(tmp_path):
     assert config.profiles["a"].due_days is None
     assert config.profiles["b"].due_days == 14  # sąsiedni profil nietknięty
 
-    # komentarze z szablonu config.toml przeżywają podmianę
-    assert "# NIP sprzedawcy" in (root / "config.toml").read_text(encoding="utf-8")
+    text = config_path.read_text(encoding="utf-8")
+    assert "# NIP sprzedawcy" in text  # komentarze nagłówka pliku przeżywają
+    assert annotation in text  # adnotacja sąsiada też — należy do jego bloku
+    # profil `b` zachowuje swój komentarz i pustą linię rozdzielającą
+    assert f"\n\n# Profil dopisany przez `templatize --write-config`.\n{annotation}\n[profiles.b]" in text
 
 
 def test_append_profile_requires_config(tmp_path):

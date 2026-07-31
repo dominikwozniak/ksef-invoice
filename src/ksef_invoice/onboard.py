@@ -144,27 +144,35 @@ def profile_block(
     return PROFILE_TEMPLATE.format(name=name, template=template, vat_rate=vat_rate, due_rule=due_rule)
 
 
-def _profile_block_span(lines: list[str], name: str) -> tuple[int, int] | None:
-    """Zakres linii bloku [profiles.<name>]: (początek, koniec wyłączny) albo None.
+def _block_start(lines: list[str], header: int) -> int:
+    """Pierwsza linia bloku tabeli o nagłówku w `header`.
 
-    Blok sięga od nagłówka tabeli do następnego nagłówka albo końca pliku; do bloku
-    wliczamy też komentarze przyklejone nad nagłówkiem i jedną pustą linię-separator,
-    czyli dokładnie to, co dopisuje PROFILE_TEMPLATE.
+    Komentarze przyklejone nad nagłówkiem opisują tabelę pod nimi, więc należą do niej —
+    razem z jedną pustą linią-separatorem. Dokładnie tak wygląda blok z PROFILE_TEMPLATE.
     """
-    headers = (f"[profiles.{name}]", f'[profiles."{name}"]')
-    start = next((index for index, line in enumerate(lines) if line.strip() in headers), None)
-    if start is None:
-        return None
-
-    end = start + 1
-    while end < len(lines) and not lines[end].lstrip().startswith("["):
-        end += 1
-
+    start = header
     while start > 0 and lines[start - 1].lstrip().startswith("#"):
         start -= 1
     if start > 0 and not lines[start - 1].strip():
         start -= 1
-    return start, end
+    return start
+
+
+def _profile_block_span(lines: list[str], name: str) -> tuple[int, int] | None:
+    """Zakres linii bloku [profiles.<name>]: (początek, koniec wyłączny) albo None."""
+    headers = (f"[profiles.{name}]", f'[profiles."{name}"]')
+    header = next((index for index, line in enumerate(lines) if line.strip() in headers), None)
+    if header is None:
+        return None
+
+    end = header + 1
+    while end < len(lines) and not lines[end].lstrip().startswith("["):
+        end += 1
+    if end < len(lines):
+        # Tą samą regułą co na początku: komentarze tuż nad następną tabelą są jej,
+        # nie nasze — bez tego podmiana kasowałaby cudze adnotacje.
+        end = _block_start(lines, end)
+    return _block_start(lines, header), end
 
 
 def replace_profile(text: str, name: str, block: str) -> str:
