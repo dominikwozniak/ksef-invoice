@@ -506,6 +506,20 @@ def test_send_number_clash_is_refused(tmp_path):
     assert "już użyty" in result.stderr
 
 
+def test_render_points_at_the_file_that_actually_exists(tmp_path):
+    """Bez extry [pdf] nie powstaje invoice.pdf, więc „Podgląd:" nie może wskazywać
+    na nieistniejący plik — a od kiedy PDF jest opcjonalny, to jest domyślny przypadek."""
+    home = _ready_home(tmp_path)
+
+    result = _run(["render", "--profile", "klient", "--month", "2026-07", "--net", "1000"], home=home)
+
+    assert result.exit_code == 0, result.output
+    preview = next(
+        line.split("Podgląd:", 1)[1].strip() for line in result.stdout.splitlines() if "Podgląd:" in line
+    )
+    assert Path(preview).exists(), f"Podgląd wskazuje na nieistniejący plik: {preview}"
+
+
 # --- end-to-end przez main() -------------------------------------------------------
 
 

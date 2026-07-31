@@ -152,18 +152,22 @@ def _render(config: Config, profile: Profile, month: str, nets: list[Decimal], n
     return invoice
 
 
-def _write_visualizations(target: Path, xml: bytes) -> None:
-    """Zapisuje invoice.html (zawsze) i invoice.pdf (jeśli WeasyPrint dostępny)."""
-    (target / "invoice.html").write_bytes(to_html(xml))
+def _write_visualizations(target: Path, xml: bytes) -> Path:
+    """Zapisuje invoice.html (zawsze) i invoice.pdf (jeśli WeasyPrint dostępny).
+    Zwraca ścieżkę do pliku, który naprawdę powstał — PDF-a albo HTML-a."""
+    html_path = target / "invoice.html"
+    html_path.write_bytes(to_html(xml))
     pdf = to_pdf(xml)
     if pdf:
         (target / "invoice.pdf").write_bytes(pdf)
-    else:
-        msg = "PDF pominięty — brak bibliotek WeasyPrint (macOS: brew install pango"
-        if sys.platform == "darwin":
-            msg += " + export DYLD_LIBRARY_PATH=/opt/homebrew/lib"
-        msg += "). HTML zapisany."
-        err_console.print(f"[yellow]{msg}[/]")
+        return target / "invoice.pdf"
+
+    msg = "PDF pominięty — brak bibliotek WeasyPrint (macOS: brew install pango"
+    if sys.platform == "darwin":
+        msg += " + export DYLD_LIBRARY_PATH=/opt/homebrew/lib"
+    msg += "). HTML zapisany."
+    err_console.print(f"[yellow]{msg}[/]")
+    return html_path
 
 
 NET_HELP = (
@@ -192,9 +196,9 @@ def render(
     target.mkdir(parents=True, exist_ok=True)
     xml_path = target / "invoice.xml"
     xml_path.write_bytes(invoice.xml)
-    _write_visualizations(target, invoice.xml)
+    preview = _write_visualizations(target, invoice.xml)
     console.print(f"\n✅ XML zwalidowany (XSD FA(3)) i zapisany: [bold]{xml_path}[/]")
-    console.print(f"Podgląd: {target / 'invoice.pdf'}")
+    console.print(f"Podgląd: {preview}")
     console.print("Numer jest przewidywany — rezerwacja następuje dopiero przy send.")
 
 
@@ -318,8 +322,7 @@ def pdf(
         )
         raise typer.Exit(code=1)
     for xml_path in matches:
-        _write_visualizations(xml_path.parent, xml_path.read_bytes())
-        console.print(f"✅ {xml_path.parent / 'invoice.pdf'}")
+        console.print(f"✅ {_write_visualizations(xml_path.parent, xml_path.read_bytes())}")
 
 
 @app.command()
