@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Zbuduj i opublikuj na PyPI
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Trusted Publishing (OIDC) — bez długożyciowego tokenu w sekretach repo,
+      # którego całe README jest o niewyciekaniu sekretów.
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Tag musi zgadzać się z wersją w pyproject
+        run: |
+          set -eu
+          tag="${GITHUB_REF_NAME#v}"
+          declared="$(uv version --short)"
+          if [ "$tag" != "$declared" ]; then
+            echo "Tag $GITHUB_REF_NAME nie zgadza się z wersją $declared w pyproject.toml" >&2
+            exit 1
+          fi
+
+      # Bramka: nie publikujemy numeru wersji, którego nie da się wycofać, jeśli
+      # suita nie jest zielona. Wariant base — taki dostaje domyślna instalacja.
+      - run: uv sync --locked --exact
+      - run: uv run ruff check
+      - run: uv run pytest
+
+      - run: uv build --out-dir dist
+      - run: uvx twine check dist/*
+
+      - name: Publikacja
+        run: uv publish --trusted-publishing always
+
+      - name: Release na GitHubie
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+
+  # Sprawdza to, czego nie sprawdzi nic przed publikacją: czy paczka *z PyPI* daje się
+  # zainstalować i przejść onboarding. Dwa blokery instalowalności w historii tego
+  # projektu (brak examples/ w wheelu, ścieżki względem drzewa źródeł) były widoczne
+  # dopiero tutaj.
+  smoke:
+    name: Smoke z PyPI / ${{ matrix.os }}
+    needs: publish
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Poczekaj na indeks i zainstaluj
+        run: |
+          set -eux
+          version="${GITHUB_REF_NAME#v}"
+          for attempt in 1 2 3 4 5 6; do
+            if uv tool install --force "ksef-invoice==$version"; then break; fi
+            echo "PyPI jeszcze nie widzi $version — próba $attempt"
+            sleep 20
+          done
+
+      - name: Świeży użytkownik, świeży katalog
+        run: |
+          set -eux
+          export PATH="$HOME/.local/bin:$PATH"
+          ksef-invoice --version
+          ksef-invoice --home "$HOME/probny" init --nip 5252000019
+          # Brak profili to oczekiwany FAIL — istotne jest, że nie ma tracebacku
+          # i że narzędzie mówi, w którym katalogu pracuje.
+          ksef-invoice --home "$HOME/probny" doctor --json > wynik.json 2> bledy.txt || true
+          grep -q '"home"' wynik.json
+          # Kontrakt maszynowy: JSON idzie na stdout, nic go nie zanieczyszcza.
+          test ! -s bledy.txt || { cat bledy.txt; exit 1; }

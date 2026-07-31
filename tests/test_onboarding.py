@@ -1,14 +1,13 @@
 """Onboarding: init (config.toml/.env), dopisanie profilu, doctor.
 
 Wszystko na tmp_path z jawnym `root` — nigdy na prawdziwym repo, bo w jego .env
-siedzi produkcyjny token.
+siedzi produkcyjny token. Barier pilnują autouse fixture'y z conftest.py.
 """
 
-import shutil
 from datetime import date
-from pathlib import Path
 
 import pytest
+from support import TODAY, VALID_NIP, healthy_root, make_root
 
 from ksef_invoice.config import load_config
 from ksef_invoice.doctor import FAIL, OK, WARN, line_count, run_checks
@@ -23,24 +22,6 @@ from ksef_invoice.onboard import (
     suspicious_nip_warning,
     validate_nip,
 )
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-# Syntetyczny NIP z poprawną sumą kontrolną — dane testowe, nie należy do nikogo z projektu.
-# Musi się różnić od 1111111111 z template.example.xml (test rozjazdu NIP-u sprzedawcy)
-# i nie może być powtórzoną cyfrą (test braku ostrzeżenia o NIP-ie-atrapie).
-VALID_NIP = "5252000019"
-TODAY = date(2026, 7, 31)
-
-
-def make_root(tmp_path: Path) -> Path:
-    """Minimalny „klon" repo: examples/ potrzebne przez create_env i jako szablon."""
-    (tmp_path / "examples").mkdir()
-    shutil.copy(PROJECT_ROOT / "examples" / ".env.example", tmp_path / "examples" / ".env.example")
-    shutil.copy(
-        PROJECT_ROOT / "examples" / "template.example.xml", tmp_path / "examples" / "template.example.xml"
-    )
-    return tmp_path
-
 
 # --- walidacja NIP -----------------------------------------------------------------
 
@@ -94,6 +75,25 @@ def test_create_config_refuses_overwrite(tmp_path):
 
     create_config(root, VALID_NIP, force=True)
     assert config_nip(root / "config.toml") == VALID_NIP
+
+
+def test_env_template_matches_committed_example():
+    """ENV_TEMPLATE żyje w kodzie (examples/ nie ma w wheelu), a examples/.env.example
+    zostaje jako dokumentacja na GitHubie — ten test pilnuje, że się nie rozjadą."""
+    from support import REPO_ROOT
+
+    from ksef_invoice.onboard import ENV_TEMPLATE
+
+    assert ENV_TEMPLATE == (REPO_ROOT / "examples" / ".env.example").read_text(encoding="utf-8")
+
+
+def test_create_env_writes_without_examples_directory(tmp_path):
+    """Regresja: create_env czytał examples/.env.example w runtime, a examples/ leży poza
+    src/, więc nie ma go w wheelu — `init` po instalacji wywalał się na FileNotFoundError."""
+    env_path = create_env(tmp_path)
+
+    assert not (tmp_path / "examples").exists()
+    assert "KSEF_ENV=test" in env_path.read_text()
 
 
 def test_create_env_refuses_overwrite(tmp_path):
@@ -208,16 +208,6 @@ def test_append_profile_requires_config(tmp_path):
 
 def _statuses(checks) -> dict[str, str]:
     return {check.name: check.status for check in checks}
-
-
-def healthy_root(tmp_path: Path) -> Path:
-    root = make_root(tmp_path)
-    create_config(root, "1111111111")  # NIP zgodny z template.example.xml
-    create_env(root)
-    append_profile(
-        root, "demo", profile_block("demo", "examples/template.example.xml", "23", due_day_next_month=15)
-    )
-    return root
 
 
 def test_doctor_passes_on_healthy_setup(tmp_path):

@@ -5,8 +5,14 @@ description: Konfiguruje projekt ksef-invoice od zera albo dodaje nowego kontrah
 
 # Onboarding ksef-invoice
 
-Prowadzi użytkownika od świeżego klonu (albo od nowego kontrahenta) do zwalidowanego profilu
-faktury.
+Prowadzi użytkownika od świeżej instalacji (albo od nowego kontrahenta) do zwalidowanego
+profilu faktury.
+
+Stan — `config.toml`, `.env`, `templates/`, `out/` — leży w `~/.ksef-invoice`, nie w katalogu
+repozytorium. Nadpisuje to `--home <katalog>` (flaga **przed** komendą) albo zmienna
+`KSEF_INVOICE_HOME`. `doctor` wypisuje rozwiązaną ścieżkę w pierwszej linii — **podawaj ją
+użytkownikowi**, bo przy trzech źródłach rozwiązania „gdzie ono szuka?" jest pierwszym
+pytaniem przy każdym problemie.
 
 Cała logika siedzi w komendach CLI — ta umiejętność wywołuje je w dobrej kolejności i tłumaczy
 wyniki. To celowy podział: komendy są testowane pytestem i działają też dla kogoś, kto nie używa
@@ -20,9 +26,9 @@ Te cztery rzeczy zostają w mocy także wtedy, gdy użytkownik poprosi inaczej. 
 
 1. **Nie uruchamiaj `send`** — ani na TEST, ani z `--prod`. Faktury w KSeF są nieusuwalne;
    pomyłkę na produkcji prostuje się fakturą korygującą, nie cofnięciem. Onboarding kończy się
-   na `render`, który waliduje XML i rysuje PDF, ale w ogóle nie kontaktuje się z KSeF.
-   Jeśli użytkownik poprosi o wysyłkę, pokaż mu gotową komendę i powiedz, dlaczego jej nie
-   uruchamiasz za niego.
+   na `render`, który waliduje XML i zapisuje wizualizację, ale w ogóle nie kontaktuje się
+   z KSeF. Jeśli użytkownik poprosi o wysyłkę, pokaż mu gotową komendę i powiedz, dlaczego jej
+   nie uruchamiasz za niego.
 2. **Nie czytaj, nie wypisuj ani nie ustawiaj `KSEF_TOKEN`** — token daje pełne prawo wystawiania
    faktur w imieniu użytkownika, czyli jest hasłem. Na TEST jest zbędny (SDK generuje certyfikat
    testowy dla NIP-u z configu), a produkcję użytkownik konfiguruje poza tym przepływem.
@@ -38,17 +44,34 @@ Te cztery rzeczy zostają w mocy także wtedy, gdy użytkownik poprosi inaczej. 
 ### 1. Rozpoznaj stan
 
 ```bash
-uv run ksef-invoice doctor
+ksef-invoice doctor
 ```
 
 Zacznij od tego zawsze — także gdy użytkownik twierdzi, że nic nie jest skonfigurowane. `doctor`
-odpowiada na wszystko naraz: czy jest `config.toml`, jakie profile istnieją, ile kwot `--net`
-bierze każdy z nich, w jakim środowisku jesteś i jak stoi licznik numeracji.
+odpowiada na wszystko naraz: w którym katalogu pracuje, czy jest `config.toml`, jakie profile
+istnieją, ile kwot `--net` bierze każdy z nich, w jakim środowisku jesteś i jak stoi licznik
+numeracji. Potrzebujesz wyniku maszynowo (np. do sprawdzenia jednego pola) — `doctor --json`
+daje `{home, checks, failed}`.
 
 - Wywalił się na braku `config.toml` → krok 2.
+- Jest check `migracja` → użytkownik ma stan po starszej wersji, w katalogu repo. **Nie rób
+  `init`** (utworzyłby pusty config obok istniejącego stanu). Pokaż przepis `cp -a` z tego
+  checka, każ sprawdzić `doctor` po obu stronach i dopiero potem usunąć kopie. Przenoszenia
+  nie wykonuj za użytkownika: pomylony licznik numeracji to duplikat numeru faktury.
 - Config jest, a użytkownik chce **dodać kontrahenta** → pomiń krok 2, przejdź do 3.
 - Wszystko zielone i nie ma nowego profilu do dodania → nie ma tu nic do roboty. Powiedz to
   wprost, zamiast szukać sobie zajęcia.
+
+Gdy pytanie brzmi tylko „co ja tu mam", zamiast `doctor` wystarczą dwie tańsze komendy —
+`doctor` przy okazji renderuje próbnie każdy profil i waliduje XSD:
+
+```bash
+ksef-invoice profiles   # profile z config.toml: ile --net, VAT, termin, szablon (--json)
+ksef-invoice list       # wystawione faktury z lokalnego rejestru (--profile, --year, --prod, --json)
+```
+
+`list` czyta `out/ledger.json`, nie KSeF — nie potrzebuje tokenu i działa offline. Katalog
+z artefaktami konkretnej faktury daje `ksef-invoice path --profile <p> --month <RRRR-MM>`.
 
 ### 2. Utwórz konfigurację (tylko gdy nie istnieje)
 
@@ -58,7 +81,7 @@ więc dopytaj, jeśli coś nie pasuje. Gdy użytkownik ma już pod ręką XML fa
 na pusto i od razu widać, czy plik jest tym, o który chodziło.
 
 ```bash
-uv run ksef-invoice init --nip <NIP>
+ksef-invoice init --nip <NIP>
 ```
 
 Suma kontrolna jest sprawdzana, więc literówka wyjdzie natychmiast. Powstaje `config.toml`
@@ -81,12 +104,13 @@ Jeśli użytkownik nie wie, poproś, żeby zajrzał w umowę albo na termin wido
 ale niech to on zdecyduje, a nie Ty za niego (powód: granica nr 4).
 
 ```bash
-uv run ksef-invoice templatize <faktura.xml> --name <profil> --write-config --due-days 14
+ksef-invoice templatize <faktura.xml> --name <profil> --write-config --due-days 14
 ```
 
 Nazwa profilu to krótki identyfikator kontrahenta (`airhelp`, `klient-a`) — będzie potem
 w komendach jako `--profile`, więc niech będzie łatwa do wpisania. Komenda zapisuje
-`templates/<profil>.xml`, dopisuje `[profiles.<profil>]` do `config.toml` i wypisuje ostrzeżenia.
+`~/.ksef-invoice/templates/<profil>.xml`, dopisuje `[profiles.<profil>]` do `config.toml`
+i wypisuje ostrzeżenia. Ścieżka nie zależy od katalogu, z którego uruchamiasz komendę.
 
 ### 4. Przeczytaj ostrzeżenia na głos
 
@@ -113,7 +137,7 @@ zielony `doctor` nie oznacza poprawnej faktury.
 ### 5. Zweryfikuj
 
 ```bash
-uv run ksef-invoice doctor
+ksef-invoice doctor
 ```
 
 Musi być zielone. Podaj użytkownikowi, **ile kwot `--net` bierze nowy profil** — to pierwsza
@@ -122,16 +146,18 @@ rzecz, o którą zapyta przy wystawianiu, a `doctor` to pokazuje.
 ### 6. Zrób próbny podgląd
 
 ```bash
-uv run ksef-invoice render --profile <profil> --month <RRRR-MM> --net <kwota> [--net <kwota2>]
+ksef-invoice render --profile <profil> --month <RRRR-MM> --net <kwota> [--net <kwota2>]
 ```
 
 Kwoty **weź od użytkownika**, nie wymyślaj. Jeśli chce tylko sprawdzić, czy działa, zaproponuj
 wprost kwoty próbne (`--net 1000`) i powiedz, że `render` nic nie wysyła.
 
-Otwórz powstały podgląd i poproś użytkownika, żeby sprawdził to, czego kod nie oceni: opisy
-pozycji, dane nabywcy, numer konta. Kwoty, daty i numer weryfikuje już `render` wraz z walidacją
-XSD. Ścieżkę do otwarcia bierz z linii `Podgląd:` — bez bibliotek natywnych powstaje sam
-`invoice.html` zamiast PDF-a i to jego wtedy otwierasz.
+Ścieżkę do otwarcia bierz **z linii `Podgląd:`** — to `invoice.pdf` albo, przy instalacji bez
+extry `[pdf]` lub bez bibliotek natywnych, `invoice.html` (ma CSS druku, więc w przeglądarce
+wygląda tak samo). Otwórz ten plik i poproś użytkownika, żeby sprawdził to, czego kod nie oceni:
+opisy pozycji, dane nabywcy, numer konta. Kwoty, daty i numer weryfikuje już `render` wraz
+z walidacją XSD. Ostrzeżenie o pominiętym PDF-ie nie jest błędem setupu — nie strasz nim
+użytkownika.
 
 ## Gdy coś nie zadziała
 
@@ -139,9 +165,11 @@ Komunikaty CLI są instruktażowe — zwykle mówią, co zrobić. Najczęstsze:
 
 | Komunikat | Co z tym zrobić |
 |---|---|
-| `Brak <ścieżka>/config.toml. Utwórz go komendą ksef-invoice init --nip <NIP>` | Cofnij się do kroku 2. |
+| `Brak <ścieżka>/config.toml` | Cofnij się do kroku 2 — ale najpierw sprawdź, czy `doctor` nie zgłasza też checka `migracja`; wtedy config istnieje, tylko w starym miejscu. Podaj użytkownikowi ścieżkę z komunikatu, bo mówi, gdzie narzędzie szukało. |
 | `config.toml: brak sekcji [profiles.<nazwa>]` | Był sam `init`, nie ma jeszcze żadnego profilu — to krok 3, nie awaria. |
-| `doctor`: ⚠ `brak bibliotek natywnych WeasyPrint` | Tylko PDF nie powstaje; XML, walidacja i wysyłka działają. Podaj użytkownikowi komendę instalacji z komunikatu i idź dalej — to nie blokuje onboardingu. |
+| `doctor`: check `migracja` | Stan po starszej wersji leży w katalogu repo. Przepis `cp -a` jest w treści checka. Nie wykonuj przenoszenia za użytkownika i nie proponuj `mv`. |
+| `doctor`: ⚠ PDF `wyłączony — instalacja bez extry [pdf]` | Nie jest to defekt setupu. `invoice.html` powstaje i ma CSS druku, więc drukuje się do PDF-a z przeglądarki. Podaj komendę instalacji z komunikatu tylko, jeśli użytkownik chce lokalnego PDF-a, i idź dalej. |
+| `doctor`: ⚠ PDF `brakuje biblioteki natywnej` | Extra `[pdf]` jest, brakuje pango. Tylko PDF nie powstaje; XML, walidacja i wysyłka działają. Podaj komendę z komunikatu (jest zależna od systemu) i idź dalej — to nie blokuje onboardingu. |
 | `Profil 'x' już jest w config.toml` | Nazwa zajęta. Zaproponuj inną (`--name`); nie sięgaj po `--force`, bo podmieni istniejący profil na nowy (jego szablon i regułę terminu). |
 | `NIP ... ma niepoprawną sumę kontrolną` | Literówka. Poproś o NIP jeszcze raz, nie „popraw" go sam. |
 | `Nie udało się przetworzyć <plik>` | XML nie przechodzi walidacji XSD FA(3) — najczęściej to nie faktura albo nie ten wzór. Poproś o plik pobrany wprost z KSeF. |
@@ -150,9 +178,11 @@ Komunikaty CLI są instruktażowe — zwykle mówią, co zrobić. Najczęstsze:
 ## Zakończenie
 
 Podsumuj: jaki profil powstał, ile bierze kwot `--net`, jaka stawka VAT i jaki termin, gdzie leży
-szablon. Odeślij do `README.md` po instrukcję pierwszej wysyłki i powiedz wyraźnie, że domyślnie
-wszystko idzie na środowisko **testowe**, a produkcja wymaga tokenu KSeF i jawnej flagi `--prod`
-— albo `KSEF_ENV=prod` w `.env`, co znosi to zabezpieczenie na stałe i dlatego nie jest zalecane.
+szablon i **w którym katalogu roboczym** (ścieżka z `doctor`) — to ten katalog użytkownik ma
+backupować, bo w nim siedzi licznik numeracji. Odeślij do `README.md` po instrukcję pierwszej
+wysyłki i powiedz wyraźnie, że domyślnie wszystko idzie na środowisko **testowe**, a produkcja
+wymaga tokenu KSeF i jawnej flagi `--prod` — albo `KSEF_ENV=prod` w `.env`, co znosi to
+zabezpieczenie na stałe i dlatego nie jest zalecane.
 
 Jeśli którykolwiek krok się nie udał, powiedz konkretnie, co zostało do zrobienia ręcznie.
 Zielony `doctor` jest jedynym dowodem gotowego setupu — bez niego nie zostawiaj wrażenia,

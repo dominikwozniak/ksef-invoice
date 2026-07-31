@@ -1,6 +1,6 @@
 [project]
 name = "ksef-invoice"
-version = "0.1.0"
+version = "1.0.0"
 description = "Wystawianie powtarzalnych faktur sprzedażowych w KSeF (API 2.0, FA(3))"
 readme = "README.md"
 license = "MIT"
@@ -9,8 +9,19 @@ authors = [
     { name = "Dominik Woźniak" }
 ]
 requires-python = ">=3.12"
+keywords = ["ksef", "faktura", "invoice", "fa3", "e-invoicing", "poland"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Natural Language :: Polish",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Accounting",
+]
 dependencies = [
-    "ksef2[pdf]>=0.18.1",
+    "ksef2>=0.18.1",
     "typer>=0.27.0",
     # Importowane wprost, nie tylko przez ksef2/typer — deklarujemy jawnie,
     # żeby zmiana zależności u nich nie wywaliła CLI przy starcie.
@@ -18,8 +29,20 @@ dependencies = [
     "rich>=15.0.0",
 ]
 
+# PDF jest opcjonalny, bo WeasyPrint wymaga bibliotek natywnych (pango), których nie da
+# się zainstalować pipem. Domyślna instalacja ma zero zależności systemowych; bez tego
+# extra `render`/`send` zapisują sam invoice.html (patrz visualize.to_pdf).
+[project.optional-dependencies]
+pdf = ["ksef2[pdf]>=0.18.1"]
+
+[project.urls]
+Homepage = "https://github.com/dominikwozniak/ksef-invoice"
+Repository = "https://github.com/dominikwozniak/ksef-invoice"
+Issues = "https://github.com/dominikwozniak/ksef-invoice/issues"
+Changelog = "https://github.com/dominikwozniak/ksef-invoice/blob/main/CHANGELOG.md"
+
 [project.scripts]
-ksef-invoice = "ksef_invoice.cli:app"
+ksef-invoice = "ksef_invoice.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.8.0,<0.9"]
@@ -30,6 +53,11 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.15.22",
 ]
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+addopts = "-q --strict-markers --strict-config"
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 110

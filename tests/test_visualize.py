@@ -34,6 +34,16 @@ def test_to_html_contains_invoice_number(invoice_xml):
     assert "<html" in html.lower()
 
 
+def test_to_html_carries_print_css(invoice_xml):
+    """Bez extry [pdf] HTML jest jedynym artefaktem do druku, więc musi mieć geometrię
+    strony z SDK — inaczej Cmd/Ctrl+P dałoby inny układ niż PDF z WeasyPrinta."""
+    html = to_html(invoice_xml).decode("utf-8")
+
+    assert "@page" in html
+    assert "A4 landscape" in html
+    assert html.index("@page") < html.index("</head>")
+
+
 def test_to_pdf(invoice_xml):
     pdf = to_pdf(invoice_xml)
     if pdf is None:
