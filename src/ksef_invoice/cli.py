@@ -1,9 +1,9 @@
-"""CLI: render / send / status."""
+"""CLI: init / templatize / doctor (onboarding), render / send / pdf (wystawianie)
+oraz profiles / list / path / status (przeglądanie katalogu roboczego)."""
 
 from __future__ import annotations
 
 import json
-import sys
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -18,7 +18,14 @@ from rich.table import Table
 from .browse import gross_total, invoice_dirs, invoice_rows, ledger_profiles
 from .config import Config, Profile, load_config
 from .doctor import FAIL, OK, WARN, line_count, run_checks
-from .invoice import Invoice, build_invoice, check_seller_nip, format_number, validate_fa3
+from .invoice import (
+    Invoice,
+    build_invoice,
+    check_seller_nip,
+    format_number,
+    parse_month,
+    validate_fa3,
+)
 from .ledger import Ledger
 from .onboard import (
     append_profile,
@@ -31,7 +38,7 @@ from .onboard import (
 )
 from .send import send_invoice
 from .templatize import templatize as run_templatize
-from .visualize import PDF_NO_EXTRA, pdf_status, to_html, to_pdf
+from .visualize import PDF_HINT, PDF_NO_EXTRA, pdf_status, to_html, to_pdf
 
 app = typer.Typer(help="Wystawianie powtarzalnych faktur sprzedażowych w KSeF.", no_args_is_help=True)
 
@@ -114,7 +121,12 @@ def _resolve_profile(config: Config, name: str | None) -> Profile:
 
 def _allocate_number(config: Config, ledger: Ledger, month: str, seq: int | None) -> tuple[int, int, str]:
     """Zwraca (seq, year, numer) — seq z ledgera albo z flagi --seq."""
-    year, month_no = int(month[:4]), int(month[5:7])
+    # Parsujemy tym samym kodem co build_invoice, żeby zły --month dał komunikat,
+    # a nie traceback z int() — ta funkcja biegnie pierwsza w render i send.
+    try:
+        year, month_no = parse_month(month)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from None
     seq = seq if seq is not None else ledger.next_seq(config.environment, year)
     return seq, year, format_number(config.number_format, seq, year, month_no)
 
@@ -162,18 +174,22 @@ def _render(config: Config, profile: Profile, month: str, nets: list[Decimal], n
 
 def _write_visualizations(target: Path, xml: bytes) -> Path:
     """Zapisuje invoice.html (zawsze) i invoice.pdf (jeśli WeasyPrint dostępny).
-    Zwraca ścieżkę do pliku, który naprawdę powstał — PDF-a albo HTML-a."""
+
+    Zwraca ścieżkę do pliku, który faktycznie powstał — PDF-a, a gdy go nie ma, HTML-a.
+    """
     html_path = target / "invoice.html"
     html_path.write_bytes(to_html(xml))
     pdf = to_pdf(xml)
     if pdf:
-        (target / "invoice.pdf").write_bytes(pdf)
-        return target / "invoice.pdf"
+        pdf_path = target / "invoice.pdf"
+        pdf_path.write_bytes(pdf)
+        return pdf_path
 
+    # Brak extry `[pdf]` i brak biblioteki natywnej wymagają różnych instrukcji naprawy.
     hint = (
         "instalacja bez extry [pdf] — uv tool install --force 'ksef-invoice[pdf]'"
         if pdf_status() == PDF_NO_EXTRA
-        else ("brak pango — brew install pango" if sys.platform == "darwin" else "brak pango")
+        else f"brak biblioteki natywnej — {PDF_HINT}"
     )
     # escape, bo "[pdf]" to dla rich-a znacznik stylu — bez tego z instrukcji instalacji
     # znikała właśnie ta część, która jest w niej istotna.
@@ -277,8 +293,8 @@ def send(
     console.print(f"\nWysyłam do KSeF ({config.environment})...")
     try:
         result = send_invoice(invoice.xml, config)
-    except Exception as error:
-        err_console.print(f"\n[red]Wysyłka nie powiodła się:[/] {error}")
+    except Exception as error:  # noqa: BLE001 — SDK, sieć i KSeF kończą tak samo: nie zapisujemy
+        err_console.print(f"\n[red]Wysyłka nie powiodła się:[/] {escape(str(error))}")
         err_console.print(
             "Faktura NIE została zarejestrowana w ledgerze — po usunięciu przyczyny uruchom komendę ponownie."
         )
@@ -582,7 +598,7 @@ def templatize(
         "--due-day-next-month",
         help="Termin płatności = D. dzień miesiąca po miesiącu rozliczeniowym (wymagane z --write-config)",
     ),
-    force: bool = typer.Option(False, "--force", help="Nadpisz profil o tej nazwie w config.toml"),
+    force: bool = typer.Option(False, "--force", help="Podmień istniejący profil o tej nazwie w config.toml"),
 ) -> None:
     """Zrób szablon z placeholderami z pobranej faktury (onboarding nowego profilu)."""
     home = _home(ctx)
@@ -597,7 +613,7 @@ def templatize(
 
     try:
         result = run_templatize(input_xml.read_bytes())
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 — każdy powód odrzucenia pliku pokazujemy wprost
         err_console.print(f"[red]Nie udało się przetworzyć {input_xml}:[/] {escape(str(error))}")
         raise typer.Exit(code=1) from None
 
@@ -725,8 +741,8 @@ def doctor(
         err_console.print(f"\n[red]{len(failed)} problem(y) do naprawy przed wysyłką.[/]")
         raise typer.Exit(code=1)
     console.print(
-        "\n✅ Setup wygląda dobrze. Podgląd faktury: [bold]ksef-invoice render --profile <profil> "
-        "--month <RRRR-MM> --net <kwota>[/]"
+        "\n✅ Setup wygląda dobrze. Podgląd faktury: [bold]ksef-invoice render "
+        "--profile <profil> --month <RRRR-MM> --net <kwota>[/]"
     )
 
 

@@ -20,13 +20,13 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Office/Business :: Financial :: Accounting",
 ]
-# lxml i rich są importowane wprost (invoice.py, templatize.py, cli.py) — dotąd wchodziły
-# tylko tranzytywnie przez signxml i typera, więc każdy ich bump mógł urwać nam import.
 dependencies = [
     "ksef2>=0.18.1",
-    "lxml>=6.0",
-    "rich>=13",
     "typer>=0.27.0",
+    # Importowane wprost, nie tylko przez ksef2/typer — deklarujemy jawnie,
+    # żeby zmiana zależności u nich nie wywaliła CLI przy starcie.
+    "lxml>=6.1.1",
+    "rich>=15.0.0",
 ]
 
 # PDF jest opcjonalny, bo WeasyPrint wymaga bibliotek natywnych (pango), których nie da
@@ -64,7 +64,7 @@ line-length = 110
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "UP", "B", "BLE"]
 
 # typer.Option/Argument w wartościach domyślnych to wzorzec Typera, nie błąd (B008).
 [tool.ruff.lint.flake8-bugbear]

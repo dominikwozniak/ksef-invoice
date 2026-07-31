@@ -39,12 +39,19 @@ issue_day = "today"
 # na GitHubie; test_onboarding pilnuje, że oba pliki się nie rozjadą.
 ENV_TEMPLATE = """\
 # Skopiuj do .env i uzupełnij.
-# Środowisko: test (domyślne) | demo | prod
+#
+# Środowisko: test (domyślne) | prod. Zostaw `test` i wybieraj produkcję flagą --prod:
+# wpisanie tu `prod` znosi zabezpieczenie „domyślnie test" — wtedy `send` idzie na
+# produkcję bez żadnej flagi. Wartość `demo` kod obsługuje, ale nie ma dla niej flagi
+# ani dokumentacji.
+# Uwaga: zmienna wyeksportowana w shellu (np. w .zshrc) wygrywa z tym plikiem.
 KSEF_ENV=test
 
-# Token KSeF — wymagany tylko dla demo/prod.
+# Token KSeF — wymagany tylko dla demo/prod, na test niepotrzebny.
 # Generowanie: zaloguj się do Aplikacji Podatnika KSeF (https://ksef.mf.gov.pl)
 # profilem zaufanym, kontekst NIP, wygeneruj token z uprawnieniem do wystawiania faktur.
+# Wartość podaj bez cudzysłowów i bez `export` — parser czyta prosty KLUCZ=wartość.
+# Token to hasło: ogranicz dostęp do pliku (chmod 600 .env).
 KSEF_TOKEN=
 """
 
@@ -174,17 +181,69 @@ def profile_block(
     return PROFILE_TEMPLATE.format(name=name, template=template, vat_rate=vat_rate, due_rule=due_rule)
 
 
+def _block_start(lines: list[str], header: int) -> int:
+    """Pierwsza linia bloku tabeli o nagłówku w `header`.
+
+    Komentarze przyklejone nad nagłówkiem opisują tabelę pod nimi, więc należą do niej —
+    razem z jedną pustą linią-separatorem. Dokładnie tak wygląda blok z PROFILE_TEMPLATE.
+    """
+    start = header
+    while start > 0 and lines[start - 1].lstrip().startswith("#"):
+        start -= 1
+    if start > 0 and not lines[start - 1].strip():
+        start -= 1
+    return start
+
+
+def _profile_block_span(lines: list[str], name: str) -> tuple[int, int] | None:
+    """Zakres linii bloku [profiles.<name>]: (początek, koniec wyłączny) albo None."""
+    headers = (f"[profiles.{name}]", f'[profiles."{name}"]')
+    header = next((index for index, line in enumerate(lines) if line.strip() in headers), None)
+    if header is None:
+        return None
+
+    end = header + 1
+    while end < len(lines) and not lines[end].lstrip().startswith("["):
+        end += 1
+    if end < len(lines):
+        # Tą samą regułą co na początku: komentarze tuż nad następną tabelą są jej,
+        # nie nasze — bez tego podmiana kasowałaby cudze adnotacje.
+        end = _block_start(lines, end)
+    return _block_start(lines, header), end
+
+
+def replace_profile(text: str, name: str, block: str) -> str:
+    """Podmienia istniejący blok profilu na nowy.
+
+    Dopisanie drugiego `[profiles.<name>]` dałoby plik, którego `tomllib` nie zparsuje
+    („Cannot declare … twice"), czyli zepsułoby każdą kolejną komendę — stąd podmiana
+    w miejscu zamiast dopisania na koniec.
+    """
+    lines = text.splitlines(keepends=True)
+    span = _profile_block_span(lines, name)
+    if span is None:
+        raise ValueError(f"Nie znalazłem bloku [profiles.{name}] do podmiany.")
+    start, end = span
+    return "".join(lines[:start]) + block + "".join(lines[end:])
+
+
 def append_profile(root: Path, name: str, block: str, *, force: bool = False) -> Path:
-    """Dopisuje blok profilu do config.toml. Wymaga istniejącego configu i wolnej nazwy profilu."""
+    """Dopisuje blok profilu do config.toml (z `force` — podmienia istniejący).
+
+    Wymaga istniejącego configu i — bez `force` — wolnej nazwy profilu.
+    """
     target = root / "config.toml"
     if not target.exists():
         raise FileNotFoundError(f"Brak {target} — uruchom najpierw `ksef-invoice init --nip <NIP>`.")
-    if name in existing_profiles(target) and not force:
-        raise ValueError(
-            f"Profil {name!r} już jest w {target.name} — nie dopisuję drugiego. "
-            "Wybierz inną nazwę (--name) albo użyj --force."
-        )
     current = target.read_text(encoding="utf-8")
+    if name in existing_profiles(target):
+        if not force:
+            raise ValueError(
+                f"Profil {name!r} już jest w {target.name} — nie dopisuję drugiego. "
+                "Wybierz inną nazwę (--name) albo użyj --force."
+            )
+        target.write_text(replace_profile(current, name, block), encoding="utf-8")
+        return target
     separator = "" if current.endswith("\n") else "\n"
     target.write_text(current + separator + block, encoding="utf-8")
     return target

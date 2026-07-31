@@ -7,17 +7,16 @@ dotyka KSeF; token raportujemy wyłącznie jako obecny/nieobecny, nigdy jego war
 from __future__ import annotations
 
 import re
-import sys
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 from .config import Config, Profile, load_config
-from .invoice import build_invoice, check_seller_nip, validate_fa3
+from .invoice import build_invoice, check_seller_nip, issue_date_for, validate_fa3
 from .ledger import Ledger
 from .onboard import nip_checksum_ok, suspicious_nip_warning
-from .visualize import PDF_NO_EXTRA, PDF_NO_PANGO, pdf_status, to_pdf
+from .visualize import PDF_HINT, PDF_NO_EXTRA, PDF_NO_PANGO, pdf_status, to_pdf
 
 LINE_PLACEHOLDER = re.compile(r"\{\{line(\d+)_net\}\}")
 
@@ -37,8 +36,22 @@ def line_count(template_path: Path) -> int:
     return len({int(match) for match in LINE_PLACEHOLDER.findall(text)})
 
 
+def _probe_month(profile: Profile, today: date) -> str:
+    """Miesiąc próbnego renderu: bieżący, a gdy data wystawienia z profilu jeszcze w nim
+    nie nadeszła (issue_day = "last" albo dzień późniejszy niż dzisiejszy) — poprzedni.
+
+    Bez tego poprawnie skonfigurowany profil z issue_day = "last" świeciłby na czerwono
+    przez cały miesiąc poza jego ostatnim dniem, bo build_invoice słusznie odrzuca P_1
+    z przyszłości.
+    """
+    if issue_date_for(profile, today.year, today.month, today) <= today:
+        return f"{today.year:04d}-{today.month:02d}"
+    previous = date(today.year, today.month, 1) - timedelta(days=1)
+    return f"{previous.year:04d}-{previous.month:02d}"
+
+
 def _check_profile(config: Config, profile: Profile, today: date) -> list[Check]:
-    """Próbny render profilu: XSD + zgodność NIP-u, na kwotach 1.00 za bieżący miesiąc."""
+    """Próbny render profilu: XSD + zgodność NIP-u, na kwotach 1.00 za możliwy miesiąc."""
     label = f"profil {profile.name}"
     count = line_count(profile.template_path)
     if count == 0:
@@ -51,8 +64,10 @@ def _check_profile(config: Config, profile: Profile, today: date) -> list[Check]
             )
         ]
 
-    month = f"{today.year:04d}-{today.month:02d}"
     try:
+        # Wybór miesiąca też czyta issue_day, więc musi być pod tym samym try —
+        # zepsute issue_day ("foo", 0) ma dać FAIL, a nie wywalić całą diagnostykę.
+        month = _probe_month(profile, today)
         invoice = build_invoice(
             month,
             [Decimal("1.00")] * count,
@@ -166,19 +181,16 @@ def _check_pdf(config: Config, today: date) -> Check:
             "z przeglądarki. Chcesz lokalnego PDF-a: uv tool install --force 'ksef-invoice[pdf]'",
         )
     if status == PDF_NO_PANGO:
-        native = (
-            "brew install pango"
-            if sys.platform == "darwin"
-            else "apt install libpango-1.0-0 libpangoft2-1.0-0"
-        )
-        return Check("PDF", WARN, f"extra [pdf] jest, brakuje biblioteki systemowej: {native}")
+        # PDF_HINT jest zależny od platformy — wcześniej ta podpowiedź żyła w trzech
+        # miejscach i rozjechała się (na Linuksie radziła `brew install`).
+        return Check("PDF", WARN, f"extra [pdf] jest, brakuje biblioteki natywnej. {PDF_HINT}")
 
     probe = _probe_xml(config, today)
     if probe is None:
         return Check("PDF", WARN, "nie sprawdzono — żaden profil nie renderuje się poprawnie")
     if to_pdf(probe) is not None:
         return Check("PDF", OK, "WeasyPrint działa — powstaje invoice.pdf")
-    return Check("PDF", WARN, "WeasyPrint jest, ale render PDF-a się nie udał")
+    return Check("PDF", WARN, f"WeasyPrint jest, ale render PDF-a się nie udał. {PDF_HINT}")
 
 
 def _probe_xml(config: Config, today: date) -> bytes | None:
@@ -189,12 +201,12 @@ def _probe_xml(config: Config, today: date) -> bytes | None:
             if not count:
                 continue
             return build_invoice(
-                f"{today.year:04d}-{today.month:02d}",
+                _probe_month(profile, today),
                 [Decimal("1.00")] * count,
                 profile,
                 number="FS/1/2026",
                 today=today,
             ).xml
-        except Exception:  # noqa: BLE001,S112 — profil zepsuty zgłosi już _check_profile
+        except Exception:  # noqa: BLE001 — profil zepsuty zgłosi już _check_profile
             continue
     return None

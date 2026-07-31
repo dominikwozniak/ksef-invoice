@@ -68,13 +68,6 @@ ale ledger **nieaktualny** jest cichy i kończy się duplikatem numeru faktury.
 
 ### Naprawione
 
-- **PDF nie generował się pod interpreterem innym niż ten z Homebrew.** WeasyPrint szuka
-  `pango` przez `ctypes.util.find_library`, a to na macOS czyta
-  `ctypes.macholib.dyld.DEFAULT_LIBRARY_FALLBACK` — listę, którą Python z Homebrew ma
-  załataną o własny prefiks, a czysty CPython (m.in. ten pobierany przez `uv`) nie. Narzędzie
-  dokłada tę ścieżkę samo, więc `export DYLD_LIBRARY_PATH=/opt/homebrew/lib` nie jest już
-  potrzebny (i nigdy nie działał z `/usr/bin/python3` — SIP strippuje tę zmienną). Wyłącznik:
-  `KSEF_INVOICE_NO_DYLD_FIXUP=1`.
 - **`templatize --write-config` uruchomione poza korzeniem repo raportowało sukces i zostawiało
   niedziałający profil** — szablon zapisywał się względem katalogu roboczego, a `config.toml`
   składa ścieżkę względem katalogu roboczego narzędzia.
@@ -94,9 +87,13 @@ ale ledger **nieaktualny** jest cichy i kończy się duplikatem numeru faktury.
 - Trzy bariery w testach: token z shella nie wchodzi do konfiguracji, żaden test nie może
   wysłać faktury do KSeF, prawdziwy `config.toml`/`.env`/`ledger.json` musi być po sesji
   nietknięty.
-- CI (GitHub Actions): macOS i Linux × instalacja z extrą `[pdf]` i bez niej, smoke instalacji
-  z wheela od zera oraz osobny job na czystym CPythonie, bo tylko tam widać regresję poprawki
-  `pango`. Publikacja przez PyPI Trusted Publishing (OIDC).
+- CI: workflow „Platformy i extras" obok istniejących (lint, format, testy, secrets scan) —
+  macOS i Linux × instalacja z extrą `[pdf]` i bez niej, smoke instalacji z wheela od zera
+  oraz osobny job na czystym CPythonie, bo tylko tam widać regresję poprawki `pango`. Lintu
+  ani formatu nie powtarza, akcje przypięte po SHA. Publikacja przez Trusted Publishing (OIDC).
+- Extra `[pdf]` nie zmienia mechanizmu wyszukiwania `pango` — została poprawka z `main`
+  (katalog Homebrew dokładany do `DYLD_LIBRARY_PATH` w trakcie działania procesu). Sprawdzone,
+  że działa tak samo jak wariant łatający listę `ctypes` i nie wymaga żadnego wyłącznika.
 
 ## Wcześniej
 

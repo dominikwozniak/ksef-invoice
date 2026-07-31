@@ -107,6 +107,13 @@ def test_resolve_profile_rejects_unknown_name():
 # --- _allocate_number --------------------------------------------------------------
 
 
+@pytest.mark.parametrize("month", ["07-2026", "2026/07", "lipiec", "2026-13"])
+def test_bad_month_is_a_parameter_error_not_a_traceback(tmp_path, month):
+    """_allocate_number biegnie przed build_invoice, więc to on musi złapać zły --month."""
+    with pytest.raises(typer.BadParameter, match="RRRR-MM"):
+        _allocate_number(_config(), Ledger(tmp_path / "ledger.json"), month, 1)
+
+
 def test_allocate_number_takes_next_from_ledger(tmp_path):
     ledger = Ledger(tmp_path / "ledger.json")
     ledger.record("test", "a", "2026-06", 4, 2026, {"number": "FS/4/2026"})

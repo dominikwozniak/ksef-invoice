@@ -123,8 +123,12 @@ wszystko się waliduje i renderuje, a mimo to przy innych kwotach da złą faktu
 | `ilość P_8B=... ≠ 1` | Szablon podstawia kwotę i pod cenę jednostkową, i pod wartość pozycji. To poprawne tylko przy ilości 1. Przy większej ilości `--net` da złą fakturę — trzeba ręcznie poprawić `templates/<profil>.xml`. |
 | `Wykryto dodatkowe stawki VAT` | Faktura ma więcej niż jedną stawkę, a model obsługuje jedną. Sumy pozostałych stawek zostały w szablonie jako **sztywne kwoty** — przy innych kwotach faktura się rozjedzie. |
 | `Nie udało się odczytać stawki VAT` | Przyjęto 23% na wyczucie. Sprawdź `vat_rate` w `config.toml`. |
+| `Nietypowa stawka P_12=...` | Stawki nie dało się zinterpretować, więc trafiła do configu jak leci. Zostawiona bez poprawki wywali każdą kolejną komendę — ustal `vat_rate` ręcznie. |
 | `NIP sprzedawcy ... różni się od nip w config.toml` | KSeF taką fakturę odrzuci. Ustalcie, która wartość jest prawdziwa, i popraw drugą. |
-| `Brak pola P_1 / P_2 / P_6 / P_15 / Termin` | XML nie jest kompletną fakturą sprzedażową — poproś o inny plik. |
+| `Brak NIP-u sprzedawcy w Podmiot1` | To nie wygląda na fakturę sprzedażową z KSeF — poproś o inny plik. |
+| `Brak pola P_1 / P_2 / P_6` | Brakuje daty wystawienia, numeru albo daty sprzedaży — placeholder trzeba wstawić ręcznie. Zwykle znaczy, że plik nie jest kompletną fakturą. |
+| `Brak P_13_1/P_13_9 (suma netto)` / `Brak P_15 (brutto)` | Szablon nie ma gdzie wstawić sum — bez ręcznej poprawki `render` przerwie na niepodmienionym placeholderze. |
+| `Brak Platnosc/TerminPlatnosci/Termin` | Faktura źródłowa nie miała terminu płatności — dodaj `{{payment_due}}` ręcznie. |
 
 Przy ilości ≠ 1 i przy wielu stawkach VAT **powiedz wprost, że szablon wymaga ręcznej korekty**,
 i wskaż, którego fragmentu `templates/<profil>.xml` to dotyczy. To dwa przypadki, w których
@@ -148,11 +152,12 @@ ksef-invoice render --profile <profil> --month <RRRR-MM> --net <kwota> [--net <k
 Kwoty **weź od użytkownika**, nie wymyślaj. Jeśli chce tylko sprawdzić, czy działa, zaproponuj
 wprost kwoty próbne (`--net 1000`) i powiedz, że `render` nic nie wysyła.
 
-`render` wypisuje ścieżkę pod „Podgląd" — to `invoice.pdf` albo, przy instalacji bez extry
-`[pdf]`, `invoice.html` (ma CSS druku, więc w przeglądarce wygląda tak samo). Otwórz ten plik
-i poproś użytkownika, żeby sprawdził to, czego kod nie oceni: opisy pozycji, dane nabywcy,
-numer konta. Kwoty, daty i numer weryfikuje już `render` wraz z walidacją XSD. Ostrzeżenie
-o pominiętym PDF-ie nie jest błędem setupu — nie strasz nim użytkownika.
+Ścieżkę do otwarcia bierz **z linii `Podgląd:`** — to `invoice.pdf` albo, przy instalacji bez
+extry `[pdf]` lub bez bibliotek natywnych, `invoice.html` (ma CSS druku, więc w przeglądarce
+wygląda tak samo). Otwórz ten plik i poproś użytkownika, żeby sprawdził to, czego kod nie oceni:
+opisy pozycji, dane nabywcy, numer konta. Kwoty, daty i numer weryfikuje już `render` wraz
+z walidacją XSD. Ostrzeżenie o pominiętym PDF-ie nie jest błędem setupu — nie strasz nim
+użytkownika.
 
 ## Gdy coś nie zadziała
 
@@ -161,8 +166,11 @@ Komunikaty CLI są instruktażowe — zwykle mówią, co zrobić. Najczęstsze:
 | Komunikat | Co z tym zrobić |
 |---|---|
 | `Brak <ścieżka>/config.toml` | Cofnij się do kroku 2 — ale najpierw sprawdź, czy `doctor` nie zgłasza też checka `migracja`; wtedy config istnieje, tylko w starym miejscu. Podaj użytkownikowi ścieżkę z komunikatu, bo mówi, gdzie narzędzie szukało. |
+| `config.toml: brak sekcji [profiles.<nazwa>]` | Był sam `init`, nie ma jeszcze żadnego profilu — to krok 3, nie awaria. |
 | `doctor`: check `migracja` | Stan po starszej wersji leży w katalogu repo. Przepis `cp -a` jest w treści checka. Nie wykonuj przenoszenia za użytkownika i nie proponuj `mv`. |
-| `Profil 'x' już jest w config.toml` | Nazwa zajęta. Zaproponuj inną (`--name`); nie sięgaj po `--force`, bo nadpisze cudzy profil. |
+| `doctor`: ⚠ PDF `wyłączony — instalacja bez extry [pdf]` | Nie jest to defekt setupu. `invoice.html` powstaje i ma CSS druku, więc drukuje się do PDF-a z przeglądarki. Podaj komendę instalacji z komunikatu tylko, jeśli użytkownik chce lokalnego PDF-a, i idź dalej. |
+| `doctor`: ⚠ PDF `brakuje biblioteki natywnej` | Extra `[pdf]` jest, brakuje pango. Tylko PDF nie powstaje; XML, walidacja i wysyłka działają. Podaj komendę z komunikatu (jest zależna od systemu) i idź dalej — to nie blokuje onboardingu. |
+| `Profil 'x' już jest w config.toml` | Nazwa zajęta. Zaproponuj inną (`--name`); nie sięgaj po `--force`, bo podmieni istniejący profil na nowy (jego szablon i regułę terminu). |
 | `NIP ... ma niepoprawną sumę kontrolną` | Literówka. Poproś o NIP jeszcze raz, nie „popraw" go sam. |
 | `Nie udało się przetworzyć <plik>` | XML nie przechodzi walidacji XSD FA(3) — najczęściej to nie faktura albo nie ten wzór. Poproś o plik pobrany wprost z KSeF. |
 | `doctor`: `brak placeholderów {{line1_net}}` | Szablon nie ma zmiennych pozycji. Zwykle znaczy, że `templatize` dostał plik już będący szablonem, a nie fakturę. |
@@ -173,7 +181,8 @@ Podsumuj: jaki profil powstał, ile bierze kwot `--net`, jaka stawka VAT i jaki 
 szablon i **w którym katalogu roboczym** (ścieżka z `doctor`) — to ten katalog użytkownik ma
 backupować, bo w nim siedzi licznik numeracji. Odeślij do `README.md` po instrukcję pierwszej
 wysyłki i powiedz wyraźnie, że domyślnie wszystko idzie na środowisko **testowe**, a produkcja
-wymaga jawnej flagi `--prod` i tokenu KSeF.
+wymaga tokenu KSeF i jawnej flagi `--prod` — albo `KSEF_ENV=prod` w `.env`, co znosi to
+zabezpieczenie na stałe i dlatego nie jest zalecane.
 
 Jeśli którykolwiek krok się nie udał, powiedz konkretnie, co zostało do zrobienia ręcznie.
 Zielony `doctor` jest jedynym dowodem gotowego setupu — bez niego nie zostawiaj wrażenia,

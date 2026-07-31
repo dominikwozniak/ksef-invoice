@@ -6,6 +6,10 @@
 # czytelną na GitHubie i narzędzie go nie czyta.
 
 # NIP sprzedawcy — kontekst uwierzytelnienia w KSeF (wspólny dla wszystkich profili).
+# To NIP-atrapa, zgodny z tym w examples/template.example.xml. Po wpisaniu swojego
+# NIP-u usuń profil [profiles.demo] poniżej — inaczej `doctor` zgłosi rozjazd NIP-u
+# między config.toml a szablonem. Atrapa daje też ostrzeżenie w `doctor`: takie NIP-y
+# są na środowisku testowym współdzielone i faktura może wrócić z kodem 440 (duplikat).
 nip = "1111111111"
 
 # Wspólna numeracja (roczna sekwencja dla wszystkich profili).
@@ -25,6 +29,8 @@ issue_day = "today"
 # Termin płatności — dokładnie jedna z reguł:
 #   due_days = N            → termin = data wystawienia + N dni
 #   due_day_next_month = D  → termin = D. dzień miesiąca po miesiącu rozliczeniowym (P_6)
+# Gdy nie ma jej ani tu, ani w profilu, obowiązuje due_days = 14. Uwaga: podanie
+# w profilu którejkolwiek z reguł odrzuca obie wartości domyślne stąd, nie tylko tę samą.
 due_days = 14
 
 # Profile — jedna powtarzalna faktura = jeden profil z własnym szablonem FA(3).

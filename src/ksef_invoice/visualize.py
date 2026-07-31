@@ -1,46 +1,60 @@
 """Lokalna wizualizacja faktury FA(3): HTML (zawsze) i PDF (jeśli działa WeasyPrint).
 
 Używa oficjalnej wizualizacji XSLT z SDK ksef2. PDF jest opcjonalny (extra `[pdf]`) i
-wymaga natywnego pango — jego brak nie może blokować wystawiania faktur, dlatego HTML
-dostaje CSS druku i nadaje się do „Zapisz jako PDF" w przeglądarce.
+wymaga bibliotek natywnych (pango i zależności) — ich brak nie może blokować wystawiania
+faktur, więc `to_pdf` zwraca None zamiast rzucać, HTML dostaje CSS druku i nadaje się do
+„Zapisz jako PDF" w przeglądarce, a `PDF_HINT` mówi, czego brakuje na tej platformie.
 """
 
 from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 from ksef2.infra.schema.fa3 import DEFAULT_CSS_OVERRIDES
 from ksef2.services.renderers import InvoiceXSLTRenderer
 
+# Katalog bibliotek Homebrew: /opt/homebrew na Apple Silicon, /usr/local na Intelu.
+_HOMEBREW_LIB_DIRS = ("/opt/homebrew/lib", "/usr/local/lib")
+
+_APT_PACKAGES = "libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1"
+
+if sys.platform == "darwin":
+    PDF_HINT = (
+        "macOS: brew install pango (nietypowy prefiks Homebrew: "
+        'export DYLD_LIBRARY_PATH="$(brew --prefix)/lib")'
+    )
+elif sys.platform.startswith("linux"):
+    PDF_HINT = f"Debian/Ubuntu: sudo apt install {_APT_PACKAGES}"
+else:
+    PDF_HINT = "Windows: zainstaluj GTK3 runtime — patrz README, sekcja o bibliotekach natywnych"
+
+# Trzy stany zamiast jednego „brak WeasyPrint": brak extry `[pdf]` i brak biblioteki
+# systemowej wymagają różnych instrukcji naprawy.
 PDF_OK = "ok"
 PDF_NO_EXTRA = "brak-extry"
 PDF_NO_PANGO = "brak-pango"
 
 
-def _fix_native_lib_lookup() -> None:
-    """Dokłada prefiks Homebrew do listy, w której macOS szuka bibliotek natywnych.
+def _add_homebrew_to_dyld_path() -> None:
+    """macOS: dołóż katalog bibliotek Homebrew do ścieżki wyszukiwania dylibów.
 
-    WeasyPrint ładuje pango przez `cffi.dlopen` po nazwie liścia ('pango-1.0'), co idzie
-    do `ctypes.util.find_library`, a to na macOS konsultuje
-    `ctypes.macholib.dyld.DEFAULT_LIBRARY_FALLBACK`. Python z Homebrew ma tę listę
-    załataną o własny prefiks — czysty CPython (m.in. ten, który pobiera `uv`) nie ma.
-    Dlatego PDF działał tylko pod interpreterem z Homebrew, a pod uv-owym milcząco nie.
-
-    `export DYLD_LIBRARY_PATH` nie jest na to lekiem: SIP strippuje tę zmienną procesom
-    uruchamianym z binarek podpisanych przez Apple, więc z /usr/bin/python3 nie działa.
+    WeasyPrint ładuje pango przez `cffi.dlopen`, a gdy to zawiedzie — przez
+    `ctypes.util.find_library`, które czyta DYLD_LIBRARY_PATH dopiero w momencie
+    wywołania. Python z Homebrew ma prefiks Homebrew we własnej domyślnej liście
+    (łatka Homebrew), ale interpreter pobrany przez uv albo z python.org już nie —
+    i wtedy sam `brew install pango` nie wystarcza. Dokładamy katalog tutaj, żeby
+    nikt nie musiał eksportować zmiennej w swoim shellu.
     """
-    if sys.platform != "darwin" or os.environ.get("KSEF_INVOICE_NO_DYLD_FIXUP"):
+    if sys.platform != "darwin":
         return
-
-    from ctypes.macholib import dyld
-
-    prefix = os.environ.get("HOMEBREW_PREFIX")
-    candidates = [f"{prefix}/lib"] if prefix else []
-    candidates += ["/opt/homebrew/lib", "/usr/local/lib"]
-    for candidate in candidates:
-        if os.path.isdir(candidate) and candidate not in dyld.DEFAULT_LIBRARY_FALLBACK:
-            dyld.DEFAULT_LIBRARY_FALLBACK.insert(0, candidate)
+    current = os.environ.get("DYLD_LIBRARY_PATH", "")
+    existing = current.split(os.pathsep) if current else []
+    missing = [path for path in _HOMEBREW_LIB_DIRS if path not in existing and Path(path).is_dir()]
+    if missing:
+        # Doklejamy na koniec — to, co ustawił użytkownik, ma pierwszeństwo.
+        os.environ["DYLD_LIBRARY_PATH"] = os.pathsep.join([*existing, *missing])
 
 
 def to_html(xml: bytes) -> bytes:
@@ -61,12 +75,8 @@ def to_html(xml: bytes) -> bytes:
 
 
 def pdf_status() -> str:
-    """PDF_OK | PDF_NO_EXTRA | PDF_NO_PANGO — rozróżnienie dla `doctor`.
-
-    Brak extry i brak biblioteki systemowej wymagają różnych instrukcji naprawy, a oba
-    kończyły się dotąd tym samym „brak WeasyPrint".
-    """
-    _fix_native_lib_lookup()
+    """PDF_OK | PDF_NO_EXTRA | PDF_NO_PANGO — rozróżnienie dla `doctor`."""
+    _add_homebrew_to_dyld_path()
     try:
         import weasyprint  # noqa: F401
     except ImportError:
@@ -79,7 +89,7 @@ def pdf_status() -> str:
 
 def to_pdf(xml: bytes) -> bytes | None:
     """PDF faktury albo None, gdy WeasyPrint/pango niedostępne."""
-    _fix_native_lib_lookup()
+    _add_homebrew_to_dyld_path()
     try:
         from ksef2.services.renderers import InvoicePDFExporter
 

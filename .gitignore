@@ -14,13 +14,25 @@ wheels/
 .ruff_cache/
 .DS_Store
 
-# Sekrety i dane prywatne (przykłady leżą w examples/ i są commitowane)
-/.env
-/config.toml
+# Sekrety i dane prywatne (przykłady leżą w examples/ i są commitowane).
+# Bez kotwicy na "/" i z gwiazdką, żeby złapać też kopie (.env.prod, config.toml.bak)
+# oraz pliki w podkatalogach — np. w worktree.
+.env
+.env.*
+config.toml
+config.toml.*
 
 # Wygenerowane faktury, UPO, ledger
 out/
 templates/
 
+# Faktury wejściowe do `templatize` — pobrane z KSeF, zawierają NIP-y, adresy,
+# numer konta i kwoty. Przykładowe XML-e w examples/ zostają.
+/*.xml
+
 # Prywatny worklog (osobiste zadania, realne dane)
 TODO.md
+
+# Lokalne ustawienia Claude Code (ścieżki i allowlisty konkretnej maszyny)
+.claude/settings.local.json
+.claude/worktrees/

@@ -1,4 +1,4 @@
-name: CI
+name: Platformy i extras
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -24,9 +24,9 @@ jobs:
         # bo to wariant, który dostaje każdy po `uv tool install ksef-invoice`.
         variant: [base, pdf]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
 
@@ -43,8 +43,9 @@ jobs:
       - name: Zależności
         run: uv sync --locked ${{ matrix.variant == 'pdf' && '--extra pdf' || '--exact' }}
 
-      - run: uv run ruff check
-      - run: uv run ruff format --check
+      # pytest zostaje, mimo test.yaml: tam jest tylko Ubuntu i tylko wariant bez extry,
+      # a z `[pdf]` przestają się skipować testy PDF-a. Lintu i formatu tu nie ma —
+      # są niezależne od systemu i biegną w lint.yaml / format-check.yaml.
       - run: uv run pytest
 
       - name: Bez extry PDF nie powstaje, ale HTML musi
@@ -72,25 +73,26 @@ jobs:
           "
 
   # Osobny job, bo to JEDYNY sposób, żeby regresja poprawki pango kiedykolwiek się
-  # ujawniła: pod Pythonem z Homebrew ctypes ma załataną listę DEFAULT_LIBRARY_FALLBACK
-  # i PDF działa nawet bez naszej poprawki. Czysty CPython (taki, jaki pobiera uv
+  # ujawniła: Python z Homebrew ma prefiks Homebrew we własnej domyślnej liście ctypes,
+  # więc PDF działa tam nawet bez naszej poprawki. Czysty CPython (taki, jaki pobiera uv
   # użytkownikowi) jej nie ma — i właśnie tam bug był widoczny.
   managed-python-pdf:
     name: macOS / czysty CPython + pango
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
       - run: brew install pango
       - run: uv sync --locked --extra pdf --python-preference only-managed
-      - name: ctypes nie ma prefiksu Homebrew, a PDF i tak powstaje
+      - name: Bez DYLD_LIBRARY_PATH w shellu PDF i tak powstaje
         run: |
+          test -z "${DYLD_LIBRARY_PATH:-}" || { echo "test bezwartosciowy: zmienna juz ustawiona" >&2; exit 1; }
           uv run python -c "
           import ctypes.macholib.dyld as dyld, sys
           print('interpreter:', sys.executable)
-          print('fallback przed importem:', dyld.DEFAULT_LIBRARY_FALLBACK)
+          print('fallback ctypes:', dyld.DEFAULT_LIBRARY_FALLBACK)
           from ksef_invoice.visualize import to_pdf
           pdf = to_pdf(open('tests/fixtures/two_lines.xml','rb').read())
           assert pdf and pdf.startswith(b'%PDF'), 'poprawka pango przestala dzialac'
@@ -105,8 +107,8 @@ jobs:
     name: Instalacja z wheela, od zera
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
 

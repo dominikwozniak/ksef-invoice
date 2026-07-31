@@ -61,7 +61,7 @@ def _fetch_upo(session, ksef_number: str) -> bytes | None:
     for attempt in range(UPO_RETRIES):
         try:
             return session.get_invoice_upo_by_ksef_number(ksef_number=ksef_number)
-        except Exception:
+        except Exception:  # noqa: BLE001 — brak UPO nie może przerwać udanej wysyłki
             if attempt == UPO_RETRIES - 1:
                 return None
             time.sleep(UPO_RETRY_INTERVAL)

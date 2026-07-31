@@ -8,7 +8,7 @@ import pytest
 
 from ksef_invoice.config import Profile
 from ksef_invoice.invoice import build_invoice
-from ksef_invoice.visualize import _fix_native_lib_lookup, to_html, to_pdf
+from ksef_invoice.visualize import PDF_HINT, _add_homebrew_to_dyld_path, to_html, to_pdf
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -51,30 +51,33 @@ def test_to_pdf(invoice_xml):
     assert pdf.startswith(b"%PDF")
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="poprawka dotyczy wyłącznie macOS")
-def test_dyld_fixup_adds_homebrew_prefix(monkeypatch):
-    """Regresja buga PDF-a: WeasyPrint szuka pango przez ctypes.util.find_library, a to
-    na macOS czyta DEFAULT_LIBRARY_FALLBACK. Python z Homebrew ma tam swój prefiks,
-    czysty CPython (ten od uv) nie — i PDF milcząco przestawał działać."""
-    from ctypes.macholib import dyld
-
-    if not os.path.isdir("/opt/homebrew/lib"):
-        pytest.skip("brak /opt/homebrew/lib na tej maszynie")
-    monkeypatch.setattr(dyld, "DEFAULT_LIBRARY_FALLBACK", ["/usr/local/lib", "/lib", "/usr/lib"])
-
-    _fix_native_lib_lookup()
-
-    assert "/opt/homebrew/lib" in dyld.DEFAULT_LIBRARY_FALLBACK
+def test_pdf_hint_mentions_this_platform():
+    """Podpowiedź musi pasować do systemu — kiedyś na Linuksie radziła `brew install`."""
+    expected = {"darwin": "brew", "linux": "apt", "win32": "GTK3"}[
+        "linux" if sys.platform.startswith("linux") else sys.platform
+    ]
+    assert expected in PDF_HINT
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="poprawka dotyczy wyłącznie macOS")
-def test_dyld_fixup_has_an_escape_hatch(monkeypatch):
-    from ctypes.macholib import dyld
+def test_add_homebrew_to_dyld_path_is_additive(monkeypatch):
+    """Katalog Homebrew doklejamy na koniec, nie kasując tego, co ustawił użytkownik."""
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setenv("DYLD_LIBRARY_PATH", "/moje/lib")
+    monkeypatch.setattr("ksef_invoice.visualize._HOMEBREW_LIB_DIRS", ("/opt/homebrew/lib",))
 
-    original = ["/usr/local/lib", "/lib", "/usr/lib"]
-    monkeypatch.setattr(dyld, "DEFAULT_LIBRARY_FALLBACK", list(original))
-    monkeypatch.setenv("KSEF_INVOICE_NO_DYLD_FIXUP", "1")
+    _add_homebrew_to_dyld_path()
+    parts = os.environ["DYLD_LIBRARY_PATH"].split(os.pathsep)
 
-    _fix_native_lib_lookup()
+    assert parts[0] == "/moje/lib"
+    assert parts[1:] == (["/opt/homebrew/lib"] if Path("/opt/homebrew/lib").is_dir() else [])
+    _add_homebrew_to_dyld_path()  # idempotentne — nie dokłada drugi raz
+    assert os.environ["DYLD_LIBRARY_PATH"] == os.pathsep.join(parts)
 
-    assert dyld.DEFAULT_LIBRARY_FALLBACK == original
+
+def test_add_homebrew_to_dyld_path_skips_other_platforms(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delenv("DYLD_LIBRARY_PATH", raising=False)
+
+    _add_homebrew_to_dyld_path()
+
+    assert "DYLD_LIBRARY_PATH" not in os.environ
