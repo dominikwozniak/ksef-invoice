@@ -30,7 +30,7 @@ class Invoice:
     xml: bytes
 
 
-def _parse_month(month: str) -> tuple[int, int]:
+def parse_month(month: str) -> tuple[int, int]:
     try:
         year_s, month_s = month.split("-")
         year, month_no = int(year_s), int(month_s)
@@ -57,6 +57,16 @@ def format_number(number_format: str, seq: int, year: int, month_no: int) -> str
     return number_format.format(seq=seq, year=year, month=month_no, month02=f"{month_no:02d}")
 
 
+def issue_date_for(profile: Profile, year: int, month_no: int, today: date) -> date:
+    """Data wystawienia (P_1) z reguły issue_day profilu — bez oceny, czy nie jest przyszła."""
+    if profile.issue_day == "today":
+        return today
+    last_day = calendar.monthrange(year, month_no)[1]
+    if profile.issue_day == "last":
+        return date(year, month_no, last_day)
+    return date(year, month_no, min(int(profile.issue_day), last_day))
+
+
 def build_invoice(
     month: str,
     nets: list[Decimal],
@@ -66,17 +76,12 @@ def build_invoice(
     generated_at: datetime | None = None,
     today: date | None = None,
 ) -> Invoice:
-    year, month_no = _parse_month(month)
+    year, month_no = parse_month(month)
     last_day = calendar.monthrange(year, month_no)[1]
     today = today or date.today()
 
     # KSeF odrzuca faktury z P_1 w przyszłości (błąd semantyki 450).
-    if profile.issue_day == "today":
-        issue_date = today
-    elif profile.issue_day == "last":
-        issue_date = date(year, month_no, last_day)
-    else:
-        issue_date = date(year, month_no, min(int(profile.issue_day), last_day))
+    issue_date = issue_date_for(profile, year, month_no, today)
     if issue_date > today:
         raise ValueError(
             f"Data wystawienia {issue_date} jest w przyszłości — KSeF odrzuci taką fakturę. "

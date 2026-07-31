@@ -416,6 +416,8 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "ksef2", extra = ["pdf"] },
+    { name = "lxml" },
+    { name = "rich" },
     { name = "typer" },
 ]
 
@@ -428,6 +430,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "ksef2", extras = ["pdf"], specifier = ">=0.18.1" },
+    { name = "lxml", specifier = ">=6.1.1" },
+    { name = "rich", specifier = ">=15.0.0" },
     { name = "typer", specifier = ">=0.27.0" },
 ]
 
