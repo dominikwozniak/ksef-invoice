@@ -215,7 +215,7 @@ def _write_visualizations(target: Path, xml: bytes) -> Path:
 
     # Brak extry `[pdf]` i brak biblioteki natywnej wymagają różnych instrukcji naprawy.
     hint = (
-        "instalacja bez extry [pdf] — uv tool install --force 'ksef-invoice[pdf]'"
+        "instalacja bez extry [pdf] — uv tool install 'ksef-invoice[pdf]'"
         if pdf_status() == PDF_NO_EXTRA
         else f"brak biblioteki natywnej — {PDF_HINT}"
     )
