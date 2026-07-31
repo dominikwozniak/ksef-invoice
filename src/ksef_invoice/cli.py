@@ -11,9 +11,18 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import Config, Profile, load_config
+from .config import PROJECT_ROOT, Config, Profile, load_config
+from .doctor import FAIL, OK, WARN, run_checks
 from .invoice import Invoice, build_invoice, check_seller_nip, format_number, validate_fa3
 from .ledger import Ledger
+from .onboard import (
+    append_profile,
+    config_nip,
+    create_config,
+    create_env,
+    profile_block,
+    suspicious_nip_warning,
+)
 from .send import send_invoice
 from .templatize import templatize as run_templatize
 from .visualize import to_html, to_pdf
@@ -273,13 +282,43 @@ def status(
     console.print_json(json.dumps(entry, ensure_ascii=False))
 
 
+def _template_ref(target: Path, root: Path) -> str:
+    """Ścieżka szablonu zapisywana w config.toml — względna do korzenia projektu,
+    bo config.py składa ją jako `root / template`."""
+    try:
+        return str(target.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(target)
+
+
 @app.command()
 def templatize(
     input_xml: Path = typer.Argument(..., help="XML faktury FA(3) pobrany z KSeF (Aplikacja Podatnika)"),
     name: str = typer.Option(None, "--name", help="Nazwa profilu; bez --out zapisze do templates/<name>.xml"),
     out: Path = typer.Option(None, "--out", help="Ścieżka wyjściowego szablonu (domyślnie stdout)"),
+    write_config: bool = typer.Option(
+        False, "--write-config", help="Dopisz profil do config.toml zamiast drukować blok do skopiowania"
+    ),
+    due_days: int = typer.Option(
+        None, "--due-days", help="Termin płatności = data wystawienia + N dni (wymagane z --write-config)"
+    ),
+    due_day_next_month: int = typer.Option(
+        None,
+        "--due-day-next-month",
+        help="Termin płatności = D. dzień miesiąca po miesiącu rozliczeniowym (wymagane z --write-config)",
+    ),
+    force: bool = typer.Option(False, "--force", help="Nadpisz profil o tej nazwie w config.toml"),
 ) -> None:
     """Zrób szablon z placeholderami z pobranej faktury (onboarding nowego profilu)."""
+    if write_config:
+        if not name:
+            raise typer.BadParameter("--write-config wymaga --name (to nazwa sekcji [profiles.<name>]).")
+        if (due_days is None) == (due_day_next_month is None):
+            raise typer.BadParameter(
+                "Podaj dokładnie jedną regułę terminu płatności: --due-days N albo --due-day-next-month D. "
+                "Tego nie da się wywnioskować z faktury — to zapis z umowy."
+            )
+
     try:
         result = run_templatize(input_xml.read_bytes())
     except Exception as error:
@@ -300,13 +339,89 @@ def templatize(
         console.print(f"[yellow]⚠ {warning}[/]")
 
     profile_name = name or "moj-profil"
-    template_ref = str(target) if target is not None else f"templates/{profile_name}.xml"
-    console.print("\nDopisz profil do [bold]config.toml[/] (uzupełnij regułę terminu płatności):")
+    template_ref = (
+        _template_ref(target, PROJECT_ROOT) if target is not None else f"templates/{profile_name}.xml"
+    )
+
+    if not write_config:
+        console.print("\nDopisz profil do [bold]config.toml[/] (uzupełnij regułę terminu płatności):")
+        console.print(
+            f"[dim]\\[profiles.{profile_name}]\n"
+            f'template = "{template_ref}"\n'
+            f'vat_rate = "{result.vat_rate}"\n'
+            "# dokładnie jedno:\n"
+            "# due_days = 14            # termin = data wystawienia + N dni\n"
+            "# due_day_next_month = 15  # termin = D. dzień miesiąca po miesiącu rozliczeniowym[/]"
+        )
+        console.print("\n[dim]Albo powtórz komendę z --write-config, żeby skrypt dopisał to za Ciebie.[/]")
+        return
+
+    block = profile_block(
+        name,
+        template_ref,
+        result.vat_rate,
+        due_days=due_days,
+        due_day_next_month=due_day_next_month,
+    )
+    try:
+        config_path = append_profile(PROJECT_ROOT, name, block, force=force)
+    except (FileNotFoundError, ValueError) as error:
+        console.print(f"[red]{error}[/]")
+        raise typer.Exit(code=1) from None
+
+    console.print(f"✅ Profil [bold]{name}[/] dopisany do {config_path}")
+
+    declared = config_nip(config_path)
+    if result.seller_nip and declared and result.seller_nip != declared:
+        console.print(
+            f"[yellow]⚠ NIP sprzedawcy w fakturze ({result.seller_nip}) różni się od nip w config.toml "
+            f"({declared}) — KSeF odrzuci taką fakturę. Popraw jedno z nich.[/]"
+        )
+    console.print("\nSprawdź setup: [bold]uv run ksef-invoice doctor[/]")
+
+
+@app.command()
+def init(
+    nip: str = typer.Option(..., "--nip", help="NIP sprzedawcy (10 cyfr; dozwolone separatory i prefiks PL)"),
+    force: bool = typer.Option(False, "--force", help="Nadpisz istniejące config.toml / .env"),
+) -> None:
+    """Utwórz config.toml i .env. Profile dopisuje potem `templatize --write-config`."""
+    try:
+        config_path = create_config(PROJECT_ROOT, nip, force=force)
+        env_path = create_env(PROJECT_ROOT, force=force)
+    except (FileExistsError, FileNotFoundError, ValueError) as error:
+        console.print(f"[red]{error}[/]")
+        raise typer.Exit(code=1) from None
+
+    console.print(f"✅ {config_path}")
+    console.print(f"✅ {env_path} (środowisko test, token pusty — na TEST niepotrzebny)")
+
+    warning = suspicious_nip_warning(config_nip(config_path) or "")
+    if warning:
+        console.print(f"[yellow]⚠ {warning}[/]")
+
     console.print(
-        f"[dim]\\[profiles.{profile_name}]\n"
-        f'template = "{template_ref}"\n'
-        f'vat_rate = "{result.vat_rate}"\n'
-        "# dokładnie jedno:\n"
-        "# due_days = 14            # termin = data wystawienia + N dni\n"
-        "# due_day_next_month = 15  # termin = D. dzień miesiąca po miesiącu rozliczeniowym[/]"
+        "\nDalej: pobierz z KSeF XML swojej wcześniejszej faktury (Aplikacja Podatnika → faktura → "
+        "pobierz XML) i zrób z niej profil:\n"
+        "[bold]uv run ksef-invoice templatize faktura.xml --name klient --write-config --due-days 14[/]"
+    )
+
+
+@app.command()
+def doctor() -> None:
+    """Sprawdź spójność setupu (config, profile, szablony, token, licznik) — nic nie wysyła."""
+    symbols = {OK: "[green]✅[/]", WARN: "[yellow]⚠[/]", FAIL: "[red]❌[/]"}
+    table = Table(title="Diagnostyka setupu", show_header=False)
+    checks = run_checks()
+    for check in checks:
+        table.add_row(symbols[check.status], check.name, check.detail)
+    console.print(table)
+
+    failed = [check for check in checks if check.status == FAIL]
+    if failed:
+        console.print(f"\n[red]{len(failed)} problem(y) do naprawy przed wysyłką.[/]")
+        raise typer.Exit(code=1)
+    console.print(
+        "\n✅ Setup wygląda dobrze. Podgląd faktury: [bold]ksef-invoice render --profile <profil> "
+        "--month <RRRR-MM> --net <kwota>[/]"
     )

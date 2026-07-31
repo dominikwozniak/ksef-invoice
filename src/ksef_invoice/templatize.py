@@ -24,6 +24,7 @@ class TemplatizeResult:
     xml: bytes
     vat_rate: str
     line_count: int
+    seller_nip: str | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -98,17 +99,35 @@ def templatize(xml: bytes) -> TemplatizeResult:
     if payment is None:
         warnings.append("Brak Platnosc/TerminPlatnosci/Termin — dodaj {{payment_due}} ręcznie.")
 
+    # Stawka VAT z pierwszej pozycji; brak P_12 zostawia domyślne "23", ale nie po cichu.
     vat_rate = "23"
-    if rows:
-        p12 = rows[0].find(_q("P_12"))
-        raw = (p12.text or "").strip() if p12 is not None else ""
-        if raw.lower().startswith("np"):
-            vat_rate = "np"
-        elif raw.isdigit():
-            vat_rate = raw
-        elif raw:
-            vat_rate = raw
-            warnings.append(f"Nietypowa stawka P_12={raw!r} — ustaw vat_rate w config.toml ręcznie.")
+    p12 = rows[0].find(_q("P_12")) if rows else None
+    raw = (p12.text or "").strip() if p12 is not None else ""
+    if raw.lower().startswith("np"):
+        vat_rate = "np"
+    elif raw.isdigit():
+        vat_rate = raw
+    elif raw:
+        vat_rate = raw
+        warnings.append(f"Nietypowa stawka P_12={raw!r} — ustaw vat_rate w config.toml ręcznie.")
+    else:
+        warnings.append(
+            'Nie udało się odczytać stawki VAT (brak pozycji albo P_12) — przyjęto vat_rate="23"; '
+            "sprawdź to w config.toml."
+        )
+
+    # NIP sprzedawcy: potrzebny, bo check_seller_nip odrzuci fakturę przy rozjeździe z config.toml.
+    seller = root.find(_q("Podmiot1"))
+    seller_nip_el = seller.find(f"{_q('DaneIdentyfikacyjne')}/{_q('NIP')}") if seller is not None else None
+    seller_nip = (seller_nip_el.text or "").strip() or None if seller_nip_el is not None else None
+    if seller_nip is None:
+        warnings.append("Brak NIP-u sprzedawcy w Podmiot1 — sprawdź, czy to faktura sprzedażowa z KSeF.")
 
     out = etree.tostring(root, xml_declaration=True, encoding="UTF-8")
-    return TemplatizeResult(xml=out, vat_rate=vat_rate, line_count=len(rows), warnings=warnings)
+    return TemplatizeResult(
+        xml=out,
+        vat_rate=vat_rate,
+        line_count=len(rows),
+        seller_nip=seller_nip,
+        warnings=warnings,
+    )

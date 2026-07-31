@@ -68,7 +68,8 @@ def load_config(root: Path = PROJECT_ROOT) -> Config:
     config_path = root / "config.toml"
     if not config_path.exists():
         raise FileNotFoundError(
-            f"Brak {config_path}. Skopiuj examples/config.example.toml do config.toml i uzupełnij dane."
+            f"Brak {config_path}. Utwórz go komendą `ksef-invoice init --nip <NIP>` "
+            "(albo skopiuj examples/config.example.toml i uzupełnij ręcznie)."
         )
     data = tomllib.loads(config_path.read_text())
 

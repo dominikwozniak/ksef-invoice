@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 from lxml import etree
 
 from ksef_invoice.config import Profile
@@ -121,3 +122,45 @@ def test_templatize_warns_on_quantity_not_one():
     text = _concrete_vat_invoice().decode().replace("<P_8B>1</P_8B>", "<P_8B>2</P_8B>")
     result = templatize(text.encode())
     assert any("P_8B" in warning for warning in result.warnings)
+
+
+def test_templatize_extracts_seller_nip():
+    result = templatize(_concrete_vat_invoice())
+    assert result.seller_nip == "1111111111"
+
+
+def test_templatize_warns_on_extra_vat_rates():
+    """Sumy pozostałych stawek zostają w szablonie jako sztywne kwoty — to musi być powiedziane."""
+    text = (
+        _concrete_vat_invoice()
+        .decode()
+        .replace("</P_14_1>", "</P_14_1><P_13_2>1000.00</P_13_2><P_14_2>80.00</P_14_2>", 1)
+    )
+    result = templatize(text.encode())
+    assert any("dodatkowe stawki VAT" in warning and "P_13_2" in warning for warning in result.warnings)
+
+
+def test_templatize_warns_on_unusual_vat_rate():
+    text = _concrete_vat_invoice().decode().replace("<P_12>23</P_12>", "<P_12>oo</P_12>")
+    result = templatize(text.encode())
+    assert result.vat_rate == "oo"
+    assert any("Nietypowa stawka" in warning for warning in result.warnings)
+
+
+def test_templatize_warns_when_vat_rate_unreadable():
+    """Bez P_12 stawka spada na domyślne 23 — nie może to przejść po cichu."""
+    text = re.sub(r"\s*<P_12>.*?</P_12>", "", _concrete_vat_invoice().decode())
+    result = templatize(text.encode())
+    assert result.vat_rate == "23"
+    assert any("stawki VAT" in warning for warning in result.warnings)
+
+
+def test_templatize_warns_on_missing_payment_term():
+    text = re.sub(r"\s*<Platnosc>.*?</Platnosc>", "", _concrete_vat_invoice().decode(), flags=re.DOTALL)
+    result = templatize(text.encode())
+    assert any("payment_due" in warning for warning in result.warnings)
+
+
+def test_templatize_rejects_non_fa3_document():
+    with pytest.raises(ValueError):
+        templatize(b'<?xml version="1.0"?><Cokolwiek><A>1</A></Cokolwiek>')
