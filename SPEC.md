@@ -28,6 +28,9 @@ XML FA(3) z szablonu profilu, waliduje go oficjalnym XSD, wysyła przez KSeF API
 | Pozycje | `--net` per pozycja → `{{lineN_net}}` | profil może mieć wiele zmiennych pozycji; sumy liczone od pozycji |
 | Faktura bez VAT | `vat_rate = "np"` | np. „np II" (odwrotne obciążenie przy usługach dla kontrahenta z UE) — suma w P_13_9, brutto=netto, P_18=1 w szablonie |
 | Termin płatności | `due_days` XOR `due_day_next_month` | np. 15. dzień miesiąca po P_6 albo wystawienie + N dni |
+| Onboarding | `init` → `templatize --write-config` → `doctor` | nowy użytkownik/kontrahent bez ręcznej edycji plików; skill `ksef-onboard` woła te same komendy |
+| Reguła terminu przy onboardingu | podawana jawnie flagą, nie wnioskowana | to zapis z umowy, a jedna faktura pasuje czasem do obu reguł |
+| Zapis profilu do `config.toml` | dopisanie tekstu, nie biblioteka TOML | `tomllib` jest read-only; dopisanie zachowuje komentarze bez nowej zależności |
 
 ## Akceptacja (zweryfikowane na api-test.ksef.mf.gov.pl, 2026-07-16)
 
@@ -40,7 +43,9 @@ XML FA(3) z szablonu profilu, waliduje go oficjalnym XSD, wysyła przez KSeF API
 - [x] `--seq 40` wymusza numer FS/40/2026; brak `--profile` przy 2 profilach → czytelny błąd
 - [x] dwa profile (VAT 23% z 2 pozycjami oraz „np II" bez P_14) przyjęte na TEST i przeszły
       walidację semantyczną KSeF
-- [ ] pierwsza wysyłka produkcyjna (`--prod --seq <N>`, wymaga tokenu KSeF użytkownika)
+- [x] pierwsza wysyłka produkcyjna (`--prod --seq <N>`, token KSeF): faktura przyjęta, numer KSeF
+      nadany, UPO podpisane przez „Ministerstwo Finansów" (bez dopisku o środowisku testowym),
+      licznik produkcyjny zasiany flagą `--seq`. Numery i daty zostają lokalnie w `out/` i `TODO.md`
 
 ## Wnioski z integracji (istotne reguły KSeF)
 
@@ -58,3 +63,5 @@ XML FA(3) z szablonu profilu, waliduje go oficjalnym XSD, wysyła przez KSeF API
 - faktury korygujące, wiele pozycji, inne waluty niż szablon
 - tryb wsadowy (batch) i offline
 - pobieranie faktur zakupowych
+- wiele stawek VAT na jednej fakturze oraz pozycje z ilością ≠ 1 — `templatize` i `doctor`
+  mają je tylko czytelnie zgłaszać, nie obsługiwać

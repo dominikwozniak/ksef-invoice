@@ -10,30 +10,66 @@ wszystkich profili: roczna sekwencja `FS/<licznik>/<rok>`.
 - Python 3.12+ i [uv](https://docs.astral.sh/uv/)
 - Konto w KSeF (na produkcji: token KSeF — patrz niżej)
 
-## Konfiguracja (jednorazowo)
+## Onboarding (jednorazowo)
 
-1. `cp examples/config.example.toml config.toml` — uzupełnij NIP, format numeracji i sekcje
-   `[profiles.<nazwa>]` (jedna powtarzalna faktura = jeden profil).
-2. `cp examples/.env.example .env` — środowisko (`test`/`demo`/`prod`) i token KSeF (dla demo/prod).
-3. Przygotuj szablony `templates/<profil>.xml` — XML FA(3) każdej faktury z placeholderami.
-   Najprościej: pobierz XML poprzedniej faktury z KSeF (Aplikacja Podatnika → faktura → pobierz XML)
-   i użyj komendy `templatize` (niżej), która automatycznie wstawi placeholdery.
+Potrzebujesz jednej rzeczy: **XML-a swojej wcześniejszej faktury pobranego z KSeF**
+(Aplikacja Podatnika → faktura → pobierz XML). Nie PDF-a, nie skanu.
 
-`config.toml`, `.env`, `templates/` i `out/` są w `.gitignore` — zawierają dane prywatne.
+### Z Claude Code — najprościej
 
-### Szablon z pobranej faktury (`templatize`)
+Wpisz w Claude Code:
 
-Zamiast ręcznie wstawiać placeholdery, podaj skryptowi XML faktury pobrany z KSeF:
-
-```bash
-uv run ksef-invoice templatize faktura.xml --name klient-a --out templates/klient-a.xml
+```
+/ksef-onboard
 ```
 
-Komenda mapuje pola FA(3) na placeholdery (`{{issue_date}}`, `{{invoice_number}}`, `{{sale_date}}`,
+Agent poprowadzi Cię przez konfigurację: zapyta o XML faktury i o regułę terminu płatności,
+zbuduje szablon, wpisze profil i zweryfikuje setup. Wyjaśnia też ostrzeżenia, które
+`templatize` wypisuje po drodze — a te warto przeczytać. **Skill nie wysyła faktur** i nie
+dotyka tokenu KSeF; pierwszą wysyłkę robisz sam.
+
+Zadziała też opis słowny, bez slasha — „skonfiguruj mi ten projekt", „dodaj nowego kontrahenta",
+„mam XML faktury, co dalej".
+
+### Ręcznie — te same trzy komendy
+
+```bash
+# 1. config.toml + .env (NIP sprzedawcy, czyli Twojej firmy — suma kontrolna jest sprawdzana)
+uv run ksef-invoice init --nip 5252000019
+
+# 2. szablon z prawdziwej faktury + wpisanie profilu do config.toml
+#    dokładnie jedna reguła terminu: --due-days N ALBO --due-day-next-month D
+uv run ksef-invoice templatize faktura.xml --name klient-a --write-config --due-day-next-month 15
+
+# 3. weryfikacja setupu — nic nie wysyła
+uv run ksef-invoice doctor
+```
+
+Po tym `doctor` mówi między innymi **ile kwot `--net` bierze każdy profil**, jaka jest stawka VAT
+i termin płatności oraz jak stoi licznik numeracji. Kolejnego kontrahenta dodajesz samym krokiem 2.
+
+`init` **nie nadpisze** istniejącego `config.toml` ani `.env` (w tym drugim może siedzieć token) —
+do tego trzeba jawnego `--force`. `config.toml`, `.env`, `templates/` i `out/` są w `.gitignore`
+— zawierają dane prywatne.
+
+### Co robi `templatize`
+
+Mapuje pola FA(3) na placeholdery (`{{issue_date}}`, `{{invoice_number}}`, `{{sale_date}}`,
 `{{net}}`, `{{vat}}`, `{{gross}}`, `{{line1_net}}`, `{{line2_net}}`, …, `{{payment_due}}`,
-`{{generated_at}}`), wypisuje ostrzeżenia (np. ilość ≠ 1, wiele stawek VAT) i gotowy blok
-`[profiles.<nazwa>]` do wklejenia w `config.toml` (dopisujesz tylko regułę terminu płatności).
-Przejrzyj wynik przed użyciem — wzór placeholderów jest też w `examples/template.example.xml`.
+`{{generated_at}}`) — po **ścieżkach elementów**, nie po wartościach, więc te same liczby
+w różnych polach nie mylą się ze sobą. Wnioskuje stawkę VAT i liczbę pozycji, wyciąga NIP
+sprzedawcy i ostrzega, gdy nie zgadza się z `config.toml`.
+
+**Czytaj ostrzeżenia.** Dwa przypadki dają szablon po cichu niedokładny i wymagają ręcznej korekty
+`templates/<profil>.xml`:
+
+- **ilość ≠ 1** — kwota `--net` wchodzi i pod cenę jednostkową (P_9A), i pod wartość pozycji (P_11),
+  co jest poprawne tylko przy ilości 1
+- **wiele stawek VAT** — model obsługuje jedną stawkę; sumy pozostałych zostają jako sztywne kwoty
+
+Bez `--write-config` komenda tylko drukuje blok `[profiles.<nazwa>]` do skopiowania —
+przydaje się, gdy chcesz najpierw zobaczyć wynik. Wzór placeholderów jest też
+w `examples/template.example.xml`.
 
 ## Użycie
 
@@ -51,6 +87,9 @@ uv run ksef-invoice send --profile klient-a --month 2026-07 --net 1000 --net 500
 
 # Status wystawionej faktury (z lokalnego rejestru)
 uv run ksef-invoice status --profile klient-a --month 2026-07 [--prod]
+
+# Diagnostyka setupu (profile, szablony, token, licznik) — nic nie wysyła
+uv run ksef-invoice doctor
 ```
 
 Po przyjęciu faktury w `out/<env>/<profil>/<miesiąc>_<numer>/` lądują: `invoice.xml`,

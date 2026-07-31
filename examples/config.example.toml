@@ -25,11 +25,18 @@ due_days = 14
 # Profile — jedna powtarzalna faktura = jeden profil z własnym szablonem FA(3).
 # Kwoty pozycji podaje się przy wysyłce: --net <pozycja1> [--net <pozycja2> ...],
 # a w szablonie odpowiadają im placeholdery {{line1_net}}, {{line2_net}}, ...
-[profiles.klient-a]
-template = "templates/klient-a.xml"
+#
+# Ten jedyny profil wskazuje szablon-atrapę z examples/, żeby config działał od razu
+# po sklonowaniu repo (katalog templates/ jest w .gitignore, więc po klonie jest pusty).
+# Swoje profile dopisuj komendą:
+#   uv run ksef-invoice templatize <faktura.xml> --name <profil> --write-config --due-days 14
+[profiles.demo]
+template = "examples/template.example.xml"
 due_day_next_month = 15
 
-[profiles.klient-b]
-template = "templates/klient-b.xml"
-vat_rate = "np"
-due_days = 30
+# Tak wygląda drugi profil — faktura bez VAT (odwrotne obciążenie dla kontrahenta z UE)
+# i termin liczony od daty wystawienia:
+# [profiles.klient-b]
+# template = "templates/klient-b.xml"
+# vat_rate = "np"
+# due_days = 30
