@@ -7,6 +7,7 @@ dotyka KSeF; token raportujemy wyłącznie jako obecny/nieobecny, nigdy jego war
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -133,7 +134,10 @@ def run_checks(root: Path = PROJECT_ROOT, today: date | None = None) -> list[Che
     elif to_pdf(probe) is not None:
         checks.append(Check("PDF", OK, "WeasyPrint działa — powstaje invoice.pdf"))
     else:
-        checks.append(Check("PDF", WARN, "brak WeasyPrint — powstaje sam HTML (macOS: brew install pango)"))
+        detail = "brak WeasyPrint — powstaje sam HTML (macOS: brew install pango)"
+        if sys.platform == "darwin":
+            detail += " + export DYLD_LIBRARY_PATH=/opt/homebrew/lib"
+        checks.append(Check("PDF", WARN, detail))
     return checks
 
 

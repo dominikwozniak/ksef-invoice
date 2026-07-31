@@ -101,7 +101,11 @@ Po przyjęciu faktury w `out/<env>/<profil>/<miesiąc>_<numer>/` lądują: `invo
 - `render` i `send` zapisują wizualizację automatycznie; dla starszych faktur:
   `uv run ksef-invoice pdf --profile klient-a --month 2026-06 [--prod]`.
 - PDF wymaga bibliotek natywnych WeasyPrint — na macOS: `brew install pango`.
-  Bez nich powstaje sam HTML (i ostrzeżenie), wysyłka działa normalnie.
+- **macOS (Homebrew/Apple Silicon):** jeśli masz zainstalowane `pango`, a skrypt nadal nie generuje PDF, musisz ustawić ścieżkę do bibliotek w shell:
+  ```bash
+  export DYLD_LIBRARY_PATH=/opt/homebrew/lib
+  ```
+  (Możesz dopisać to do swojego `.zshrc` lub `.bash_profile`). Bez tego powstaje sam HTML (i ostrzeżenie), wysyłka działa normalnie.
 
 ### Środowisko testowe w przeglądarce
 
