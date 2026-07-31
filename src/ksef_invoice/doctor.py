@@ -17,7 +17,7 @@ from .config import Config, Profile, load_config
 from .invoice import build_invoice, check_seller_nip, validate_fa3
 from .ledger import Ledger
 from .onboard import nip_checksum_ok, suspicious_nip_warning
-from .visualize import to_pdf
+from .visualize import PDF_NO_EXTRA, PDF_NO_PANGO, pdf_status, to_pdf
 
 LINE_PLACEHOLDER = re.compile(r"\{\{line(\d+)_net\}\}")
 
@@ -150,17 +150,35 @@ def run_checks(root: Path, today: date | None = None) -> list[Check]:
         )
         checks.append(Check(f"licznik {environment}", OK, detail))
 
+    checks.append(_check_pdf(config, today))
+    return checks
+
+
+def _check_pdf(config: Config, today: date) -> Check:
+    """Trzy różne stany wymagają trzech różnych instrukcji naprawy — dotąd wszystkie
+    kończyły się jednym „brak WeasyPrint". Brak PDF-a jest oczekiwany, nie jest defektem."""
+    status = pdf_status()
+    if status == PDF_NO_EXTRA:
+        return Check(
+            "PDF",
+            WARN,
+            "wyłączony — instalacja bez extry [pdf]; HTML powstaje i drukuje się do PDF-a "
+            "z przeglądarki. Chcesz lokalnego PDF-a: uv tool install --force 'ksef-invoice[pdf]'",
+        )
+    if status == PDF_NO_PANGO:
+        native = (
+            "brew install pango"
+            if sys.platform == "darwin"
+            else "apt install libpango-1.0-0 libpangoft2-1.0-0"
+        )
+        return Check("PDF", WARN, f"extra [pdf] jest, brakuje biblioteki systemowej: {native}")
+
     probe = _probe_xml(config, today)
     if probe is None:
-        checks.append(Check("PDF", WARN, "nie sprawdzono — żaden profil nie renderuje się poprawnie"))
-    elif to_pdf(probe) is not None:
-        checks.append(Check("PDF", OK, "WeasyPrint działa — powstaje invoice.pdf"))
-    else:
-        detail = "brak WeasyPrint — powstaje sam HTML (macOS: brew install pango)"
-        if sys.platform == "darwin":
-            detail += " + export DYLD_LIBRARY_PATH=/opt/homebrew/lib"
-        checks.append(Check("PDF", WARN, detail))
-    return checks
+        return Check("PDF", WARN, "nie sprawdzono — żaden profil nie renderuje się poprawnie")
+    if to_pdf(probe) is not None:
+        return Check("PDF", OK, "WeasyPrint działa — powstaje invoice.pdf")
+    return Check("PDF", WARN, "WeasyPrint jest, ale render PDF-a się nie udał")
 
 
 def _probe_xml(config: Config, today: date) -> bytes | None:

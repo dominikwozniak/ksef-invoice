@@ -12,6 +12,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from .config import Config, Profile, load_config
@@ -29,7 +30,7 @@ from .onboard import (
 )
 from .send import send_invoice
 from .templatize import templatize as run_templatize
-from .visualize import to_html, to_pdf
+from .visualize import PDF_NO_EXTRA, pdf_status, to_html, to_pdf
 
 app = typer.Typer(help="Wystawianie powtarzalnych faktur sprzedażowych w KSeF.", no_args_is_help=True)
 
@@ -168,11 +169,17 @@ def _write_visualizations(target: Path, xml: bytes) -> Path:
         (target / "invoice.pdf").write_bytes(pdf)
         return target / "invoice.pdf"
 
-    msg = "PDF pominięty — brak bibliotek WeasyPrint (macOS: brew install pango"
-    if sys.platform == "darwin":
-        msg += " + export DYLD_LIBRARY_PATH=/opt/homebrew/lib"
-    msg += "). HTML zapisany."
-    err_console.print(f"[yellow]{msg}[/]")
+    hint = (
+        "instalacja bez extry [pdf] — uv tool install --force 'ksef-invoice[pdf]'"
+        if pdf_status() == PDF_NO_EXTRA
+        else ("brak pango — brew install pango" if sys.platform == "darwin" else "brak pango")
+    )
+    # escape, bo "[pdf]" to dla rich-a znacznik stylu — bez tego z instrukcji instalacji
+    # znikała właśnie ta część, która jest w niej istotna.
+    err_console.print(
+        f"[yellow]PDF pominięty ({escape(hint)}). HTML zapisany i ma CSS druku — "
+        "Cmd/Ctrl+P w przeglądarce daje ten sam układ A4.[/]"
+    )
     return html_path
 
 
@@ -448,7 +455,7 @@ def templatize(
             f"[yellow]⚠ NIP sprzedawcy w fakturze ({result.seller_nip}) różni się od nip w config.toml "
             f"({declared}) — KSeF odrzuci taką fakturę. Popraw jedno z nich.[/]"
         )
-    console.print("\nSprawdź setup: [bold]uv run ksef-invoice doctor[/]")
+    console.print("\nSprawdź setup: [bold]ksef-invoice doctor[/]")
 
 
 @app.command()
@@ -476,7 +483,7 @@ def init(
     console.print(
         "\nDalej: pobierz z KSeF XML swojej wcześniejszej faktury (Aplikacja Podatnika → faktura → "
         "pobierz XML) i zrób z niej profil:\n"
-        "[bold]uv run ksef-invoice templatize faktura.xml --name klient --write-config --due-days 14[/]"
+        "[bold]ksef-invoice templatize faktura.xml --name klient --write-config --due-days 14[/]"
     )
 
 
@@ -509,7 +516,9 @@ def doctor(
     symbols = {OK: "[green]✅[/]", WARN: "[yellow]⚠[/]", FAIL: "[red]❌[/]"}
     table = Table(title="Diagnostyka setupu", show_header=False)
     for check in checks:
-        table.add_row(symbols[check.status], check.name, check.detail)
+        # Check.detail to zwykły tekst (trafia też do JSON-a), więc escape — inaczej rich
+        # zjada z niego "[pdf]" jako znacznik stylu i psuje instrukcję instalacji.
+        table.add_row(symbols[check.status], check.name, escape(check.detail))
     console.print(table)
 
     if failed:

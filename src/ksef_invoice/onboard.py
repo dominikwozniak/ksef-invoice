@@ -30,7 +30,7 @@ number_format = "FS/{{seq}}/{{year}}"
 issue_day = "today"
 
 # Profile dopisze templatize, jeden na powtarzalną fakturę:
-#   uv run ksef-invoice templatize <faktura.xml> --name <profil> --write-config --due-days 14
+#   ksef-invoice templatize <faktura.xml> --name <profil> --write-config --due-days 14
 """
 
 # Wzorzec .env trzymamy w kodzie, nie w examples/ — examples/ leży poza src/, więc nie ma
