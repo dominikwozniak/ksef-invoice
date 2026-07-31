@@ -27,6 +27,11 @@ dev = [
     "ruff>=0.15.22",
 ]
 
+[tool.pytest.ini_options]
+minversion = "9.0"
+addopts = "-q --strict-markers --strict-config"
+testpaths = ["tests"]
+
 [tool.ruff]
 line-length = 110
 target-version = "py312"
