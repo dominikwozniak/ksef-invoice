@@ -155,6 +155,37 @@ na myślniki, więc katalog wygląda tak: `out/test/klient-a/2026-07_FS-1-2026/`
 tam `invoice.xml` oraz `invoice.html` + `invoice.pdf` (oficjalna wizualizacja); `send` dokłada
 `upo.xml` (UPO) i `meta.json` (numer KSeF, numery referencyjne).
 
+### Przeglądanie
+
+Trzy komendy czytają to, co masz w katalogu projektu. Żadna nie dotyka sieci i żadna nie
+potrzebuje tokenu:
+
+```bash
+# Co jest w config.toml: ile kwot --net bierze profil, VAT, termin, który szablon
+uv run ksef-invoice profiles
+
+# Historia wystawionych faktur z out/ledger.json
+uv run ksef-invoice list
+uv run ksef-invoice list --profile klient-a --year 2026 --prod
+
+# Ścieżka do artefaktów — pod podstawienie w shellu
+open "$(uv run ksef-invoice path --profile klient-a --month 2026-07)"
+open "$(uv run ksef-invoice path --month 2026-07 --prod)/invoice.pdf"   # --profile zbędny przy jednym profilu
+```
+
+`list` czyta **lokalny rejestr**, nie KSeF — pokazuje numer, który przydzieliło to narzędzie,
+i działa offline. Kolumna `pliki` mówi, czy artefakty faktury nadal leżą w `out/`; `—` znaczy,
+że rejestr o fakturze wie, ale katalogu już nie ma. Tabela świadomie nie ma numeru KSeF ani
+ścieżki — pełne dane daje `--json`, a jedną fakturę `status --month`.
+
+`profiles`, `status` i `path` przyjmują też profil, który jest już tylko w rejestrze (bez sekcji
+w `config.toml`) — historia zostaje po zakończeniu współpracy z klientem. Samo wystawianie
+(`render`/`send`) wymaga profilu w konfiguracji, bo bez niego nie ma szablonu ani stawki VAT.
+
+Odczyt wprost z KSeF (np. żeby zobaczyć faktury wystawione poza tym narzędziem) wymagałby
+tokenu z uprawnieniem **`invoice_read`** — w KSeF jest to zakres rozdzielny od `invoice_write`,
+którym się wystawia. Nie ma tego jeszcze.
+
 ### Podgląd faktur (PDF/HTML)
 
 - `render` i `send` zapisują wizualizację automatycznie; dla starszych faktur:
@@ -223,7 +254,9 @@ automatycznie. `--seq` służy też do korekty przy rozjeździe.
 
 Repozytorium jest publiczne, ale **Twoje dane nigdy do niego nie trafiają**. Twój NIP, adres,
 dane klientów, kwoty i szablony żyją wyłącznie lokalnie w `config.toml`, `.env` i `templates/`
-(oraz w `out/`) — wszystkie w `.gitignore`. Nie commituj tych plików.
+(oraz w `out/`) — wszystkie w `.gitignore`. Nie commituj tych plików. Zawartość pokazują
+[`profiles`, `list` i `path`](#przegl%C4%85danie); `--json` w `profiles` i `list` **nie** wynosi
+tokenu, mimo że `load_config` wciąga go do konfiguracji.
 
 Pamiętaj też o **pliku wejściowym**: `faktura.xml` pobrana z KSeF na potrzeby `templatize`
 zawiera komplet danych — NIP-y obu stron, adresy, numer konta i kwoty. `.gitignore` wyłapuje
