@@ -28,6 +28,18 @@ class Ledger:
     def get(self, environment: str, profile: str, month: str) -> dict | None:
         return self._load().get(environment, {}).get("profiles", {}).get(profile, {}).get(month)
 
+    def entries(self, environment: str) -> list[tuple[str, str, dict]]:
+        """(profil, miesiąc, wpis) dla wszystkich faktur w środowisku, chronologicznie.
+
+        Miesiąc bierzemy z klucza, nie z wpisu — klucz jest tu autorytatywny, a starsze
+        wpisy pochodzą z wcześniejszej wersji `meta` i nie mają wszystkich pól.
+        """
+        profiles = self._load().get(environment, {}).get("profiles", {})
+        rows = [
+            (profile, month, entry) for profile, months in profiles.items() for month, entry in months.items()
+        ]
+        return sorted(rows, key=lambda row: (row[1], row[0]))
+
     def next_seq(self, environment: str, year: int) -> int:
         """Kolejny wolny numer w rocznej sekwencji (bez rezerwacji)."""
         sequences = self._load().get(environment, {}).get("sequences", {})
