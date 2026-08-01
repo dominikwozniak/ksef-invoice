@@ -1,22 +1,79 @@
+<div align="center">
+
 # ksef-invoice
+
+**Powtarzalne faktury sprzedażowe w KSeF — jeden profil, jedna komenda, FA(3).**
+
+[![Test](https://github.com/dominikwozniak/ksef-invoice/actions/workflows/test.yaml/badge.svg)](https://github.com/dominikwozniak/ksef-invoice/actions/workflows/test.yaml)
+[![Lint](https://github.com/dominikwozniak/ksef-invoice/actions/workflows/lint.yaml/badge.svg)](https://github.com/dominikwozniak/ksef-invoice/actions/workflows/lint.yaml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
+[Szybki start](#szybki-start) · [Komendy](#komendy) · [Onboarding](#onboarding-jednorazowo) ·
+[Bezpieczeństwo](#bezpieczeństwo) · [Problemy](#rozwiązywanie-problemów)
+
+</div>
 
 Wystawianie powtarzalnych faktur sprzedażowych w KSeF (oficjalne API 2.0, schema FA(3)).
 Każda powtarzalna faktura to **profil** z własnym szablonem XML; dane prawie się nie
 zmieniają — skrypt podmienia tylko numer, daty i kwoty. Numeracja jest wspólna dla
 wszystkich profili: roczna sekwencja `FS/<licznik>/<rok>`.
 
-## Wymagania
+<details>
+<summary>Spis treści</summary>
 
-**Wymagane:**
+- [Szybki start](#szybki-start)
+- [Wymagania](#wymagania)
+- [Instalacja](#instalacja)
+- [Onboarding (jednorazowo)](#onboarding-jednorazowo)
+- [Komendy](#komendy)
+  - [Wystawianie](#wystawianie)
+  - [Przeglądanie](#przeglądanie)
+  - [Podgląd faktury (PDF/HTML)](#podgląd-faktury-pdfhtml)
+  - [Środowisko testowe w przeglądarce](#środowisko-testowe-w-przeglądarce)
+- [Konfiguracja](#konfiguracja)
+- [Bezpieczeństwo](#bezpieczeństwo)
+- [Rozwiązywanie problemów](#rozwiązywanie-problemów)
+- [Rozwój projektu](#rozwój-projektu)
+- [Jak to działa](#jak-to-działa)
+- [Licencja](#licencja)
+
+</details>
+
+## Szybki start
+
+Potrzebujesz dwóch rzeczy: [uv](https://docs.astral.sh/uv/) i **XML-a swojej wcześniejszej
+faktury pobranego z KSeF**. Wszystko domyślnie idzie na środowisko **testowe** — produkcja
+wymaga jawnej flagi `--prod`.
+
+```bash
+git clone git@github.com:dominikwozniak/ksef-invoice.git
+cd ksef-invoice
+
+# 1. config.toml + .env (NIP sprzedawcy, czyli Twojej firmy)
+uv run ksef-invoice init --nip 5252000019
+
+# 2. szablon z prawdziwej faktury + wpisanie profilu do config.toml
+uv run ksef-invoice templatize ~/Downloads/faktura.xml \
+    --name klient-a --write-config --due-day-next-month 15
+
+# 3. weryfikacja setupu — nic nie wysyła
+uv run ksef-invoice doctor
+
+# 4. pierwsza faktura, na TEST (bez skutków prawnych)
+uv run ksef-invoice send --profile klient-a --month 2026-07 --net 1000
+```
+
+Wolisz prowadzenie za rękę? Wpisz `/ksef-onboard` w Claude Code — patrz
+[Onboarding](#onboarding-jednorazowo).
+
+## Wymagania
 
 - [uv](https://docs.astral.sh/uv/) — `brew install uv` albo
   `curl -LsSf https://astral.sh/uv/install.sh | sh`. Pythona 3.12 uv dociągnie sam,
   jeśli nie masz go w systemie.
 - Konto w KSeF (na produkcji: token KSeF — patrz [Token KSeF](#token-ksef-produkcja)).
-
-**Opcjonalne:** biblioteki natywne do PDF-a. Bez nich cały skrypt działa normalnie —
-zamiast `invoice.pdf` powstaje sam `invoice.html`. Patrz
-[Biblioteki natywne (PDF)](#biblioteki-natywne-pdf).
 
 ## Instalacja
 
@@ -29,34 +86,6 @@ uv run ksef-invoice doctor   # pierwsze uruchomienie dociąga zależności (~40 
 Na tym etapie `doctor` powie, że brakuje `config.toml` — to normalne, tworzy go onboarding
 poniżej. Wszystkie komendy uruchamiaj **z katalogu repozytorium**: `config.toml`, `.env`,
 `templates/` i `out/` skrypt trzyma w korzeniu projektu.
-
-### Biblioteki natywne (PDF)
-
-Wizualizacja HTML powstaje zawsze. PDF wymaga bibliotek natywnych WeasyPrint (pango
-i zależności — cairo ani gdk-pixbuf **nie** są potrzebne):
-
-| System | Instalacja |
-|---|---|
-| macOS | `brew install pango` |
-| Debian/Ubuntu | `sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1` |
-| Fedora | `sudo dnf install pango harfbuzz fontconfig` |
-| Arch | `sudo pacman -S pango harfbuzz fontconfig` |
-| Windows | [GTK3 runtime](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows) |
-
-Sprawdzenie: `uv run ksef-invoice doctor` ma w wierszu **PDF** napisać „WeasyPrint działa".
-
-Na macOS skrypt sam dokłada katalog bibliotek Homebrew (`/opt/homebrew/lib` na Apple Silicon,
-`/usr/local/lib` na Intelu) do ścieżki wyszukiwania — samo `brew install pango` wystarcza.
-Powód, dla którego to potrzebne: Python z Homebrew ma prefiks Homebrew we własnej domyślnej
-liście, ale interpreter pobrany przez uv albo z python.org już nie, więc bez tego widziałby
-tylko `/usr/local/lib`. Jeśli trzymasz Homebrew pod nietypowym prefiksem, wskaż go ręcznie:
-
-```bash
-export DYLD_LIBRARY_PATH="$(brew --prefix)/lib"   # do .zshrc / .bash_profile
-```
-
-Na Linuksie analogicznie działa `LD_LIBRARY_PATH`, gdy pango leży poza standardowymi
-katalogami (nix, conda, własna kompilacja).
 
 ## Onboarding (jednorazowo)
 
@@ -102,7 +131,7 @@ krokiem 1 a 2 zgłosi „brak sekcji `[profiles.<nazwa>]`". To oczekiwane — pr
 `init` **nie nadpisze** istniejącego `config.toml` ani `.env` (w tym drugim może siedzieć token) —
 do tego trzeba jawnego `--force`. `config.toml`, `.env`, `templates/` i `out/` są w `.gitignore`
 — zawierają dane prywatne. **Plik wejściowy `faktura.xml` też nie należy do repozytorium** —
-patrz [Prywatność](#prywatność).
+patrz [Co zostaje lokalnie](#co-zostaje-lokalnie).
 
 ### Co robi `templatize`
 
@@ -126,7 +155,25 @@ Szablon i tak powstaje: z `--name` ląduje w `templates/<nazwa>.xml`, a `--out <
 kieruje go gdzie indziej (bez obu — na stdout). `--force` **podmienia** istniejący profil
 o tej nazwie. Wzór placeholderów jest też w `examples/template.example.xml`.
 
-## Użycie
+## Komendy
+
+| Komenda | Co robi | Sieć / token |
+|---|---|---|
+| `render` | Generuje XML i wizualizację, waliduje XSD FA(3) — niczego nie wysyła | — |
+| `send` | To co `render` plus wysyłka: numer KSeF i UPO | **KSeF** (na produkcji: token) |
+| `pdf` | Odtwarza HTML/PDF dla faktury już leżącej w `out/` | — |
+| `status` | Pokazuje zapisany status jednej faktury (profil + miesiąc) | — |
+| `list` | Historia wystawionych faktur z lokalnego rejestru | — |
+| `profiles` | Co jest w `config.toml`: liczba kwot `--net`, VAT, termin, szablon | — |
+| `path` | Wypisuje ścieżkę do katalogu z artefaktami | — |
+| `init` | Tworzy `config.toml` i `.env` | — |
+| `templatize` | Robi szablon z faktury FA(3) i dopisuje profil do configu | — |
+| `doctor` | Diagnostyka setupu: config, profile, szablony, token, licznik | — |
+
+Sieci dotyka **wyłącznie `send`** — reszta czyta to, co masz na dysku. Pełną listę flag daje
+`uv run ksef-invoice <komenda> --help`.
+
+### Wystawianie
 
 ```bash
 # Podgląd: generuje i waliduje XML (XSD FA(3)), niczego nie wysyła; numer przewidywany
@@ -152,7 +199,7 @@ przydaje się, żeby zobaczyć, jak wyjdzie faktura o konkretnym numerze.
 
 Artefakty lądują w `out/<env>/<profil>/<miesiąc>_<numer>/` — ukośniki w numerze zamieniane są
 na myślniki, więc katalog wygląda tak: `out/test/klient-a/2026-07_FS-1-2026/`. `render` zapisuje
-tam `invoice.xml` oraz `invoice.html` + `invoice.pdf` (oficjalna wizualizacja); `send` dokłada
+tam `invoice.xml` oraz `invoice.html` (i `invoice.pdf`, jeśli masz pango); `send` dokłada
 `upo.xml` (UPO) i `meta.json` (numer KSeF, numery referencyjne).
 
 ### Przeglądanie
@@ -168,7 +215,7 @@ uv run ksef-invoice profiles
 uv run ksef-invoice list
 uv run ksef-invoice list --profile klient-a --year 2026 --prod
 
-# Ścieżka do artefaktów — pod podstawienie w shellu
+# Ścieżka do artefaktów — pod podstawienie w shellu (na Linuksie: xdg-open)
 open "$(uv run ksef-invoice path --profile klient-a --month 2026-07)"
 open "$(uv run ksef-invoice path --month 2026-07 --prod)/invoice.pdf"   # --profile zbędny przy jednym profilu
 ```
@@ -178,7 +225,11 @@ i działa offline. Kolumna `pliki` mówi, czy artefakty faktury nadal leżą w `
 że rejestr o fakturze wie, ale katalogu już nie ma. Tabela świadomie nie ma numeru KSeF ani
 ścieżki — pełne dane daje `--json`, a jedną fakturę `status --month`.
 
-`profiles`, `status` i `path` przyjmują też profil, który jest już tylko w rejestrze (bez sekcji
+Po `send --force` za ten sam miesiąc istnieje **więcej niż jeden** katalog, a `path` wypisuje
+je wszystkie, po jednym w wierszu — podstawienie `"$(…)"` z przykładu wyżej się wtedy wykłada.
+Wywołaj wtedy samo `path` i wybierz katalog ręcznie.
+
+`path`, `status` i `pdf` przyjmują też profil, który jest już tylko w rejestrze (bez sekcji
 w `config.toml`) — historia zostaje po zakończeniu współpracy z klientem. Samo wystawianie
 (`render`/`send`) wymaga profilu w konfiguracji, bo bez niego nie ma szablonu ani stawki VAT.
 
@@ -186,14 +237,48 @@ Odczyt wprost z KSeF (np. żeby zobaczyć faktury wystawione poza tym narzędzie
 tokenu z uprawnieniem **`invoice_read`** — w KSeF jest to zakres rozdzielny od `invoice_write`,
 którym się wystawia. Nie ma tego jeszcze.
 
-### Podgląd faktur (PDF/HTML)
+### Podgląd faktury (PDF/HTML)
 
-- `render` i `send` zapisują wizualizację automatycznie; dla starszych faktur:
-  `uv run ksef-invoice pdf --profile klient-a --month 2026-06` (dodaj `--prod` dla faktury
-  produkcyjnej).
-- HTML powstaje zawsze, PDF tylko z bibliotekami natywnymi — patrz
-  [Biblioteki natywne (PDF)](#biblioteki-natywne-pdf). Ich brak daje ostrzeżenie i sam HTML;
-  **wysyłka działa normalnie**.
+`render` i `send` zapisują wizualizację same; dla wcześniejszej faktury:
+
+```bash
+uv run ksef-invoice pdf --profile klient-a --month 2026-06   # --prod dla produkcyjnej
+```
+
+**HTML powstaje zawsze.** PDF to dodatek — potrzebuje bibliotek natywnych WeasyPrint (pango).
+Bez nich `doctor` odnotuje to jako opcję, a nie usterkę, i **wszystko poza samym PDF-em działa
+normalnie**: render, walidacja XSD, wysyłka, UPO.
+
+<details>
+<summary><b>Chcesz też PDF — instalacja pango</b></summary>
+
+Potrzebne jest pango i jego zależności — cairo ani gdk-pixbuf **nie** są potrzebne:
+
+| System | Instalacja |
+|---|---|
+| macOS | `brew install pango` |
+| Debian/Ubuntu | `sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1` |
+| Fedora | `sudo dnf install pango harfbuzz fontconfig` |
+| Arch | `sudo pacman -S pango harfbuzz fontconfig` |
+| Windows | [GTK3 runtime](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows) |
+
+Sprawdzenie: `uv run ksef-invoice doctor` ma w wierszu **PDF (opcjonalny)** napisać
+„WeasyPrint działa".
+
+Na macOS skrypt sam dokłada katalog bibliotek Homebrew (`/opt/homebrew/lib` na Apple Silicon,
+`/usr/local/lib` na Intelu) do ścieżki wyszukiwania — samo `brew install pango` wystarcza.
+Powód, dla którego to potrzebne: Python z Homebrew ma prefiks Homebrew we własnej domyślnej
+liście, ale interpreter pobrany przez uv albo z python.org już nie, więc bez tego widziałby
+tylko `/usr/local/lib`. Jeśli trzymasz Homebrew pod nietypowym prefiksem, wskaż go ręcznie:
+
+```bash
+export DYLD_LIBRARY_PATH="$(brew --prefix)/lib"   # do .zshrc / .bash_profile
+```
+
+Na Linuksie analogicznie działa `LD_LIBRARY_PATH`, gdy pango leży poza standardowymi
+katalogami (nix, conda, własna kompilacja).
+
+</details>
 
 ### Środowisko testowe w przeglądarce
 
@@ -203,6 +288,11 @@ uwierzytelnienia): podaj NIP kontekstu (ten z `config.toml`) — zobaczysz wszys
 wysłane przez skrypt na TEST, z podglądem i pobieraniem XML/HTML/PDF. Faktury testowe nie mają
 skutków prawnych; każdy może się tam uwierzytelnić dowolnym NIP-em, więc nie wysyłaj na TEST
 prawdziwych kwot.
+
+## Konfiguracja
+
+Pełna, skomentowana referencja leży w `examples/config.example.toml`. Poniżej to, co warto
+znać na start.
 
 ### Pozycje, VAT i terminy płatności (per profil)
 
@@ -232,13 +322,36 @@ i `{month02}` — licznik pozostaje roczny, nie resetuje się co miesiąc).
 uwzględniający faktury wystawione w tym roku poza skryptem) — kolejne wysyłki kontynuują
 automatycznie. `--seq` służy też do korekty przy rozjeździe.
 
-## Zabezpieczenia
+## Bezpieczeństwo
 
-- Domyślnie wszystko idzie na **środowisko testowe**; produkcja wymaga jawnego `--prod`
-  **albo** `KSEF_ENV=prod` w `.env` — patrz ostrzeżenie w sekcji
-  [Token KSeF](#token-ksef-produkcja).
-- Przed wysyłką skrypt pokazuje podsumowanie (ze środowiskiem — `PROD` na czerwono) i pyta
-  o potwierdzenie (`--yes` pomija).
+### Test kontra produkcja
+
+Domyślnie wszystko idzie na **środowisko testowe**; produkcja wymaga jawnego `--prod`
+**albo** `KSEF_ENV=prod` w `.env`. Przed każdą wysyłką skrypt pokazuje podsumowanie
+(ze środowiskiem — `PROD` na czerwono) i pyta o potwierdzenie; `--yes` je pomija.
+
+⚠️ **`KSEF_ENV=prod` na stałe w `.env` znosi zabezpieczenie „domyślnie test"**: od tej chwili
+`send` idzie na produkcję **bez** `--prod`, a `render`, `status` i katalog `out/` też pracują
+na produkcji. Zostaje tylko czerwone `PROD` w podsumowaniu i pytanie o potwierdzenie.
+Uwaga też na kolejność: zmienna wyeksportowana w shellu (np. w `.zshrc`) **wygrywa** z `.env`.
+
+Wartość `KSEF_ENV=demo` jest obsługiwana przez kod, ale nieudokumentowana i bez własnej flagi —
+używaj `test` albo `prod`.
+
+### Token KSeF (produkcja)
+
+1. Zaloguj się do Aplikacji Podatnika KSeF: <https://ksef.mf.gov.pl> (profil zaufany / e-dowód).
+2. Wybierz kontekst swojego NIP.
+3. Wygeneruj **token** z uprawnieniem do wystawiania faktur (InvoiceWrite).
+4. Wpisz go do `.env` jako `KSEF_TOKEN=...`. Środowisko zostaw na `KSEF_ENV=test`
+   i wybieraj produkcję flagą `--prod`.
+
+Token daje pełne prawo wystawiania faktur w Twoim imieniu — traktuj jak hasło; ogranicz do
+niego dostęp (`chmod 600 .env`). Na środowisku testowym token nie jest potrzebny (używany jest
+certyfikat testowy generowany przez SDK dla NIP-u z `config.toml`).
+
+### Co blokuje pomyłkę
+
 - Rejestr `out/ledger.json` blokuje drugą fakturę z tego samego profilu za ten sam
   miesiąc (`--force` wymusza) oraz drugie użycie tego samego numeru.
 - Pierwsza produkcyjna wysyłka w roku jest blokowana, dopóki nie zasiejesz licznika
@@ -250,12 +363,12 @@ automatycznie. `--seq` służy też do korekty przy rozjeździe.
   może być w przyszłości (koniec miesiąca rozliczeniowego).
 - Faktury w KSeF są **nieusuwalne** — pomyłkę na produkcji prostuje się fakturą korygującą.
 
-## Prywatność
+### Co zostaje lokalnie
 
 Repozytorium jest publiczne, ale **Twoje dane nigdy do niego nie trafiają**. Twój NIP, adres,
 dane klientów, kwoty i szablony żyją wyłącznie lokalnie w `config.toml`, `.env` i `templates/`
 (oraz w `out/`) — wszystkie w `.gitignore`. Nie commituj tych plików. Zawartość pokazują
-[`profiles`, `list` i `path`](#przegl%C4%85danie); `--json` w `profiles` i `list` **nie** wynosi
+[`profiles`, `list` i `path`](#przeglądanie); `--json` w `profiles` i `list` **nie** wynosi
 tokenu, mimo że `load_config` wciąga go do konfiguracji.
 
 Pamiętaj też o **pliku wejściowym**: `faktura.xml` pobrana z KSeF na potrzeby `templatize`
@@ -263,30 +376,12 @@ zawiera komplet danych — NIP-y obu stron, adresy, numer konta i kwoty. `.gitig
 XML-e z korzenia repo, ale najbezpieczniej trzymać ją poza katalogiem projektu i podać ścieżkę:
 `uv run ksef-invoice templatize ~/Downloads/faktura.xml --name klient-a …`.
 
-Token KSeF trzymaj tylko w `.env` i traktuj jak hasło. Na środowisku testowym nie wysyłaj
-prawdziwych kwot (każdy może się tam uwierzytelnić dowolnym NIP-em).
-
-## Token KSeF (produkcja)
-
-1. Zaloguj się do Aplikacji Podatnika KSeF: <https://ksef.mf.gov.pl> (profil zaufany / e-dowód).
-2. Wybierz kontekst swojego NIP.
-3. Wygeneruj **token** z uprawnieniem do wystawiania faktur (InvoiceWrite).
-4. Wpisz go do `.env` jako `KSEF_TOKEN=...`. Środowisko zostaw na `KSEF_ENV=test`
-   i wybieraj produkcję flagą `--prod`.
-
-⚠️ **`KSEF_ENV=prod` na stałe w `.env` znosi zabezpieczenie „domyślnie test"**: od tej chwili
-`send` idzie na produkcję **bez** `--prod`, a `render`, `status` i katalog `out/` też pracują
-na produkcji. Zostaje tylko czerwone `PROD` w podsumowaniu i pytanie o potwierdzenie.
-Uwaga też na kolejność: zmienna wyeksportowana w shellu (np. w `.zshrc`) **wygrywa** z `.env`.
-
-Wartość `KSEF_ENV=demo` jest obsługiwana przez kod, ale nieudokumentowana i bez własnej flagi —
-używaj `test` albo `prod`.
-
-Token daje pełne prawo wystawiania faktur w Twoim imieniu — traktuj jak hasło; ogranicz do
-niego dostęp (`chmod 600 .env`). Na środowisku testowym token nie jest potrzebny (używany jest
-certyfikat testowy generowany przez SDK dla NIP-u z `config.toml`).
+Na środowisku testowym nie wysyłaj prawdziwych kwot (każdy może się tam uwierzytelnić
+dowolnym NIP-em).
 
 ## Rozwiązywanie problemów
+
+### Instalacja i setup
 
 | Objaw | Co zrobić |
 |---|---|
@@ -294,16 +389,26 @@ certyfikat testowy generowany przez SDK dla NIP-u z `config.toml`).
 | `Brak .../config.toml` | Jesteś poza katalogiem repo albo przed onboardingiem — `cd` do klonu i `uv run ksef-invoice init --nip <NIP>`. |
 | `config.toml: brak sekcji [profiles.<nazwa>]` | `init` tworzy config bez profili. Dopisz profil krokiem 2: `templatize … --write-config`. |
 | `NIP … ma niepoprawną sumę kontrolną` | Literówka w NIP-ie — podaj go jeszcze raz. |
-| `doctor`: ⚠ `brak bibliotek natywnych WeasyPrint` | Tylko PDF nie powstaje, reszta działa. Instalacja: [Biblioteki natywne (PDF)](#biblioteki-natywne-pdf). |
+| `doctor`: `–` `PDF (opcjonalny)` | To nie usterka, tylko niewłączona opcja: PDF nie powstaje, wszystko inne działa. Chcesz PDF → [instalacja pango](#podgląd-faktury-pdfhtml). |
+
+### Szablon i profil
+
+| Objaw | Co zrobić |
+|---|---|
 | `doctor`: ⚠ `NIP … to powtórzona cyfra` | Masz w configu NIP-atrapę (np. z `examples/`). Na TEST grozi to błędem 440 (duplikat) — wstaw prawdziwy NIP. |
 | `NIP sprzedawcy w szablonie … różni się od NIP w config.toml` | KSeF odrzuciłby taką fakturę. Ustal, która wartość jest prawdziwa, i popraw drugą. |
 | `Nie udało się przetworzyć <plik>` | XML nie przechodzi walidacji XSD FA(3) — to nie jest faktura FA(3) pobrana z KSeF. |
-| `To pierwsza produkcyjna wysyłka w <rok>` | Zasiej licznik: `--seq <numer kolejnej faktury>`. |
 | `Podano N kwot --net, a szablon … nie ma placeholdera {{lineN_net}}` | Profil ma inną liczbę pozycji — `doctor` pokazuje, ile kwot bierze każdy profil. |
+
+### Wysyłka i numeracja
+
+| Objaw | Co zrobić |
+|---|---|
+| `To pierwsza produkcyjna wysyłka w <rok>` | Zasiej licznik: `--seq <numer kolejnej faktury>`. |
 | `Miesiąc … — oczekiwany format RRRR-MM` | `--month 2026-07`, nie `07-2026`. |
 | Faktura wystawiona w KSeF, ale `status` jej nie widzi | Wpis w `out/ledger.json` nie powstał (np. przerwanie po wysyłce). Sprawdź fakturę w Aplikacji Podatnika **zanim** ponowisz — ponowna wysyłka da błąd 440 (duplikat). |
 
-## Testy i jakość kodu
+## Rozwój projektu
 
 ```bash
 uv run pytest            # testy
@@ -311,7 +416,10 @@ uv run ruff check        # linter (błędy, nieużywane importy, sortowanie impo
 uv run ruff format       # formatowanie (odpowiednik prettiera)
 ```
 
-## Stack
+Te same bramki chodzą w CI na każdym pushu i PR-ze: testy na Pythonie **3.12 i 3.13**,
+`ruff check`, `ruff format --check` oraz skan sekretów (trufflehog).
+
+## Jak to działa
 
 - [ksef2](https://github.com/artpods56/ksef2) — community SDK KSeF API 2.0 (auth, szyfrowanie
   AES-256/RSA-OAEP, sesje online, UPO); dolna granica wersji w `pyproject.toml`, dokładna
@@ -320,6 +428,10 @@ uv run ruff format       # formatowanie (odpowiednik prettiera)
 - typer + rich (CLI), lxml (XML), WeasyPrint przez ksef2 (PDF), pytest, ruff (lint + format)
 
 Pliki przykładowe (`config.example.toml`, `.env.example`, `template.example.xml`) leżą w `examples/`.
+
+Decyzje projektowe, wnioski z integracji z KSeF i to, co świadomie zostało poza zakresem —
+w [`SPEC.md`](SPEC.md). Scenariusz onboardingowego agenta:
+[`.claude/skills/ksef-onboard/SKILL.md`](.claude/skills/ksef-onboard/SKILL.md).
 
 Dokumentacja API: [CIRFMF/ksef-docs](https://github.com/CIRFMF/ksef-docs),
 środowiska: test `api-test.ksef.mf.gov.pl`, demo `api-demo.ksef.mf.gov.pl`, prod `api.ksef.mf.gov.pl`.
