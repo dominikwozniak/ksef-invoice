@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from ksef_invoice.config import load_config
-from ksef_invoice.doctor import FAIL, OK, WARN, line_count, run_checks
+from ksef_invoice.doctor import FAIL, OK, SKIP, WARN, line_count, run_checks
 from ksef_invoice.onboard import (
     append_profile,
     config_nip,
@@ -231,6 +231,16 @@ def test_doctor_passes_on_healthy_setup(tmp_path):
     assert statuses["NIP sprzedawcy"] == WARN
     detail = next(check.detail for check in checks if check.name == "profil demo")
     assert "1× --net" in detail
+
+
+def test_doctor_never_warns_about_missing_pdf(tmp_path):
+    """PDF to opcja, nie usterka — wiersz nie może świecić jak realny problem setupu.
+
+    Asercja nie zakłada, czy pango jest w tym środowisku: z nim wychodzi OK, bez niego SKIP.
+    """
+    checks = run_checks(healthy_root(tmp_path), today=TODAY)
+
+    assert _statuses(checks)["PDF (opcjonalny)"] in (OK, SKIP)
 
 
 def test_doctor_accepts_issue_day_last_mid_month(tmp_path):

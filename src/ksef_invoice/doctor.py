@@ -20,7 +20,10 @@ from .visualize import PDF_HINT, to_pdf
 
 LINE_PLACEHOLDER = re.compile(r"\{\{line(\d+)_net\}\}")
 
-OK, WARN, FAIL = "ok", "warn", "fail"
+# SKIP to nie usterka, tylko niewłączona opcja (dziś: PDF bez pango). Osobny status,
+# bo WARN stoi w tej samej tabeli co realne problemy setupu i kazał szukać naprawy tam,
+# gdzie nic nie jest zepsute.
+OK, WARN, FAIL, SKIP = "ok", "warn", "fail", "skip"
 
 
 @dataclass(frozen=True)
@@ -143,16 +146,23 @@ def run_checks(root: Path = PROJECT_ROOT, today: date | None = None) -> list[Che
         )
         checks.append(Check(f"licznik {environment}", OK, detail))
 
+    checks.append(_pdf_check(config, today))
+    return checks
+
+
+def _pdf_check(config: Config, today: date) -> Check:
+    """PDF nigdy nie jest WARN ani FAIL — wystawianie faktur działa bez niego."""
+    label = "PDF (opcjonalny)"
     probe = _probe_xml(config, today)
     if probe is None:
-        checks.append(Check("PDF", WARN, "nie sprawdzono — żaden profil nie renderuje się poprawnie"))
-    elif to_pdf(probe) is not None:
-        checks.append(Check("PDF", OK, "WeasyPrint działa — powstaje invoice.pdf"))
-    else:
-        checks.append(
-            Check("PDF", WARN, f"brak bibliotek natywnych WeasyPrint — powstaje sam HTML. {PDF_HINT}")
-        )
-    return checks
+        return Check(label, SKIP, "nie sprawdzono — żaden profil nie renderuje się poprawnie")
+    if to_pdf(probe) is not None:
+        return Check(label, OK, "WeasyPrint działa — powstaje invoice.pdf")
+    return Check(
+        label,
+        SKIP,
+        f"pango nie zainstalowane — powstaje sam HTML; wystawianie działa. Chcesz PDF? {PDF_HINT}",
+    )
 
 
 def _probe_xml(config: Config, today: date) -> bytes | None:

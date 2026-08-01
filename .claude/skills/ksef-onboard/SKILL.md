@@ -141,7 +141,7 @@ Komunikaty CLI są instruktażowe — zwykle mówią, co zrobić. Najczęstsze:
 |---|---|
 | `Brak <ścieżka>/config.toml. Utwórz go komendą ksef-invoice init --nip <NIP>` | Cofnij się do kroku 2. |
 | `config.toml: brak sekcji [profiles.<nazwa>]` | Był sam `init`, nie ma jeszcze żadnego profilu — to krok 3, nie awaria. |
-| `doctor`: ⚠ `brak bibliotek natywnych WeasyPrint` | Tylko PDF nie powstaje; XML, walidacja i wysyłka działają. Podaj użytkownikowi komendę instalacji z komunikatu i idź dalej — to nie blokuje onboardingu. |
+| `doctor`: `– PDF (opcjonalny)` — `pango nie zainstalowane` | Nie jest to usterka (stąd szare `–`, nie ⚠): tylko PDF nie powstaje, a XML, walidacja i wysyłka działają. Wspomnij, że komenda instalacji jest w komunikacie, i idź dalej — to nie blokuje onboardingu. |
 | `Profil 'x' już jest w config.toml` | Nazwa zajęta. Zaproponuj inną (`--name`); nie sięgaj po `--force`, bo podmieni istniejący profil na nowy (jego szablon i regułę terminu). |
 | `NIP ... ma niepoprawną sumę kontrolną` | Literówka. Poproś o NIP jeszcze raz, nie „popraw" go sam. |
 | `Nie udało się przetworzyć <plik>` | XML nie przechodzi walidacji XSD FA(3) — najczęściej to nie faktura albo nie ten wzór. Poproś o plik pobrany wprost z KSeF. |

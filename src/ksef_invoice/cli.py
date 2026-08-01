@@ -15,7 +15,7 @@ from rich.table import Table
 
 from .browse import artifact_dir_name, gross_total, invoice_dirs, invoice_rows, ledger_profiles
 from .config import PROJECT_ROOT, Config, Profile, load_config
-from .doctor import FAIL, OK, WARN, line_count, run_checks
+from .doctor import FAIL, OK, SKIP, WARN, line_count, run_checks
 from .invoice import (
     Invoice,
     build_invoice,
@@ -163,8 +163,10 @@ def _write_visualizations(target: Path, xml: bytes) -> Path:
         pdf_path = target / "invoice.pdf"
         pdf_path.write_bytes(pdf)
         return pdf_path
+    # Zaczynamy od tego, co powstało: brak PDF-a to niewłączona opcja, nie usterka.
     console.print(
-        f"[yellow]PDF pominięty — brak bibliotek natywnych WeasyPrint. {PDF_HINT}. HTML zapisany.[/]"
+        f"[dim]Zapisano invoice.html. PDF (opcjonalny) pominięty — brak pango; "
+        f"wystawianie działa bez niego. Chcesz też PDF? {PDF_HINT}[/]"
     )
     return html_path
 
@@ -650,7 +652,7 @@ def init(
 @app.command()
 def doctor() -> None:
     """Sprawdź spójność setupu (config, profile, szablony, token, licznik) — nic nie wysyła."""
-    symbols = {OK: "[green]✅[/]", WARN: "[yellow]⚠[/]", FAIL: "[red]❌[/]"}
+    symbols = {OK: "[green]✅[/]", WARN: "[yellow]⚠[/]", FAIL: "[red]❌[/]", SKIP: "[dim]–[/]"}
     table = Table(title="Diagnostyka setupu", show_header=False)
     checks = run_checks()
     for check in checks:
