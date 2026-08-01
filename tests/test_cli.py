@@ -356,8 +356,8 @@ def test_doctor_hints_migration_when_state_sits_in_cwd(tmp_path, monkeypatch):
 
 def test_doctor_table_does_not_let_rich_eat_square_brackets(tmp_path, monkeypatch):
     """„[pdf]" to dla rich-a znacznik stylu. Bez escape'owania z instrukcji
-    `uv tool install 'ksef-invoice[pdf]'` znikała dokładnie ta część, która jest w niej
-    istotna — a Check.detail jest zwykłym tekstem, nie markupem."""
+    `uv tool install --force 'ksef-invoice[pdf]'` znikała dokładnie ta część, która
+    jest w niej istotna — a Check.detail jest zwykłym tekstem, nie markupem."""
     from ksef_invoice import doctor as doctor_module
 
     monkeypatch.setattr(

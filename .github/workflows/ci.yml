@@ -123,10 +123,6 @@ jobs:
           print(write_concrete_invoice(Path('/tmp')))
           "
 
-      # --force tylko tutaj, nie w podpowiedziach dla użytkownika: robi ten krok idempotentnym
-      # przy ponowieniu joba. U użytkownika ta flaga wyłączałaby odmowę nadpisania pliku
-      # wykonywalnego, którego uv nie zakładało (pipx, pip --user, brew) — a dołożenie extry
-      # jej nie potrzebuje, bo uv reinstaluje samo, gdy zmienią się wymagania.
       - name: Zainstaluj jak użytkownik
         run: uv tool install --force dist/*.whl
 

@@ -178,10 +178,7 @@ def _check_pdf(config: Config, today: date) -> Check:
             "PDF",
             WARN,
             "wyłączony — instalacja bez extry [pdf]; HTML powstaje i drukuje się do PDF-a "
-            # Bez --force: zmiana wymagań (dołożenie extry) i tak wywołuje reinstalację, a
-            # --force wyłączałby jedyne zabezpieczenie uv w tym miejscu — odmowę nadpisania
-            # pliku wykonywalnego, którego uv nie zakładało (pipx, pip --user, brew).
-            "z przeglądarki. Chcesz lokalnego PDF-a: uv tool install 'ksef-invoice[pdf]'",
+            "z przeglądarki. Chcesz lokalnego PDF-a: uv tool install --force 'ksef-invoice[pdf]'",
         )
     if status == PDF_NO_PANGO:
         # PDF_HINT jest zależny od platformy — wcześniej ta podpowiedź żyła w trzech

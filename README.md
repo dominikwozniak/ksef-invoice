@@ -50,11 +50,8 @@ lokalnie. Jeśli chcesz od razu `invoice.pdf`, dołóż bibliotekę natywną (pa
 | Windows | [GTK3 runtime](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows) |
 
 ```bash
-uv tool install 'ksef-invoice[pdf]'
+uv tool install --force 'ksef-invoice[pdf]'
 ```
-
-Apostrofy są potrzebne — w zsh `[pdf]` bez nich to wzorzec globa. Dokładanie extry do już
-zainstalowanego narzędzia nie wymaga `--force`: uv widzi zmienione wymagania i reinstaluje samo.
 
 Sprawdzenie: `ksef-invoice doctor` ma w wierszu **PDF** napisać „WeasyPrint działa".
 
