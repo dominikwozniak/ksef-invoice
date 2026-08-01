@@ -1,9 +1,4 @@
-# Poglądowy config — pokazuje wszystkie opcje z komentarzami.
-#
-# Nie kopiuj go ręcznie: `ksef-invoice init --nip <NIP>` tworzy właściwy
-# ~/.ksef-invoice/config.toml (wzorzec jest wbudowany w kod), a profile dopisuje
-# `ksef-invoice templatize ... --write-config`. Ten plik jest tylko dokumentacją
-# czytelną na GitHubie i narzędzie go nie czyta.
+# Skopiuj do config.toml i uzupełnij swoimi danymi.
 
 # NIP sprzedawcy — kontekst uwierzytelnienia w KSeF (wspólny dla wszystkich profili).
 # To NIP-atrapa, zgodny z tym w examples/template.example.xml. Po wpisaniu swojego
@@ -37,13 +32,12 @@ due_days = 14
 # Kwoty pozycji podaje się przy wysyłce: --net <pozycja1> [--net <pozycja2> ...],
 # a w szablonie odpowiadają im placeholdery {{line1_net}}, {{line2_net}}, ...
 #
-# Ścieżka `template` jest względna do katalogu roboczego (~/.ksef-invoice), więc
-# w prawdziwym configu wygląda jak "templates/<profil>.xml" — tak ją zapisuje
-# `templatize --write-config`. NIP 1111111111 poniżej to atrapa zgodna z
-# examples/template.example.xml; na środowisku testowym KSeF taki NIP bywa „zużyty"
-# przez innych integratorów i faktura wraca z kodem 440, więc użyj swojego.
+# Ten jedyny profil wskazuje szablon-atrapę z examples/, żeby config działał od razu
+# po sklonowaniu repo (katalog templates/ jest w .gitignore, więc po klonie jest pusty).
+# Swoje profile dopisuj komendą:
+#   uv run ksef-invoice templatize <faktura.xml> --name <profil> --write-config --due-days 14
 [profiles.demo]
-template = "templates/demo.xml"
+template = "examples/template.example.xml"
 due_day_next_month = 15
 
 # Tak wygląda drugi profil — faktura bez VAT (odwrotne obciążenie dla kontrahenta z UE)
