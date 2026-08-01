@@ -12,11 +12,11 @@ from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from .config import Config, Profile, load_config
+from .config import PROJECT_ROOT, Config, Profile, load_config
 from .invoice import build_invoice, check_seller_nip, issue_date_for, validate_fa3
 from .ledger import Ledger
 from .onboard import nip_checksum_ok, suspicious_nip_warning
-from .visualize import PDF_HINT, PDF_NO_EXTRA, PDF_NO_PANGO, pdf_status, to_pdf
+from .visualize import PDF_HINT, to_pdf
 
 LINE_PLACEHOLDER = re.compile(r"\{\{line(\d+)_net\}\}")
 
@@ -91,25 +91,7 @@ def _check_profile(config: Config, profile: Profile, today: date) -> list[Check]
     ]
 
 
-def _legacy_layout_hint(root: Path) -> Check | None:
-    """Stary układ (stan trzymany w klonie repo) wykryty w katalogu roboczym shella.
-
-    Sama podpowiedź, świadomie — przenoszenia kod nie robi. Połowicznie wykonana
-    migracja out/ledger.json to dokładnie ta awaria, która duplikuje numer faktury.
-    """
-    legacy = Path.cwd()
-    if legacy == root or not (legacy / "config.toml").exists():
-        return None
-    return Check(
-        "migracja",
-        WARN,
-        f"config.toml leży w {legacy}, a szukam go w {root}. Przenieś stan: "
-        f"cp -a config.toml .env templates out {root}/ (cp, nie mv — potem sprawdź, "
-        "czy licznik jest ten sam, i dopiero wtedy usuń kopie).",
-    )
-
-
-def run_checks(root: Path, today: date | None = None) -> list[Check]:
+def run_checks(root: Path = PROJECT_ROOT, today: date | None = None) -> list[Check]:
     """Wszystkie checki po kolei; pierwszy blokujący (brak configu) przerywa dalsze."""
     today = today or date.today()
     checks: list[Check] = []
@@ -117,11 +99,7 @@ def run_checks(root: Path, today: date | None = None) -> list[Check]:
     try:
         config = load_config(root)
     except Exception as error:  # noqa: BLE001 — komunikaty load_config są celowo instruktażowe
-        checks.append(Check("config.toml", FAIL, str(error).replace("\n", " ")[:300]))
-        hint = _legacy_layout_hint(root)
-        if hint:
-            checks.append(hint)
-        return checks
+        return [Check("config.toml", FAIL, str(error).replace("\n", " ")[:300])]
 
     checks.append(Check("config.toml", OK, f"wczytany, {len(config.profiles)} profil(e)"))
 
@@ -165,32 +143,16 @@ def run_checks(root: Path, today: date | None = None) -> list[Check]:
         )
         checks.append(Check(f"licznik {environment}", OK, detail))
 
-    checks.append(_check_pdf(config, today))
-    return checks
-
-
-def _check_pdf(config: Config, today: date) -> Check:
-    """Trzy różne stany wymagają trzech różnych instrukcji naprawy — dotąd wszystkie
-    kończyły się jednym „brak WeasyPrint". Brak PDF-a jest oczekiwany, nie jest defektem."""
-    status = pdf_status()
-    if status == PDF_NO_EXTRA:
-        return Check(
-            "PDF",
-            WARN,
-            "wyłączony — instalacja bez extry [pdf]; HTML powstaje i drukuje się do PDF-a "
-            "z przeglądarki. Chcesz lokalnego PDF-a: uv tool install --force 'ksef-invoice[pdf]'",
-        )
-    if status == PDF_NO_PANGO:
-        # PDF_HINT jest zależny od platformy — wcześniej ta podpowiedź żyła w trzech
-        # miejscach i rozjechała się (na Linuksie radziła `brew install`).
-        return Check("PDF", WARN, f"extra [pdf] jest, brakuje biblioteki natywnej. {PDF_HINT}")
-
     probe = _probe_xml(config, today)
     if probe is None:
-        return Check("PDF", WARN, "nie sprawdzono — żaden profil nie renderuje się poprawnie")
-    if to_pdf(probe) is not None:
-        return Check("PDF", OK, "WeasyPrint działa — powstaje invoice.pdf")
-    return Check("PDF", WARN, f"WeasyPrint jest, ale render PDF-a się nie udał. {PDF_HINT}")
+        checks.append(Check("PDF", WARN, "nie sprawdzono — żaden profil nie renderuje się poprawnie"))
+    elif to_pdf(probe) is not None:
+        checks.append(Check("PDF", OK, "WeasyPrint działa — powstaje invoice.pdf"))
+    else:
+        checks.append(
+            Check("PDF", WARN, f"brak bibliotek natywnych WeasyPrint — powstaje sam HTML. {PDF_HINT}")
+        )
+    return checks
 
 
 def _probe_xml(config: Config, today: date) -> bytes | None:
