@@ -1,4 +1,5 @@
-"""CLI: init / templatize / doctor (onboarding) oraz render / send / pdf / status."""
+"""CLI: init / templatize / doctor (onboarding), render / send / pdf (wystawianie)
+oraz profiles / list / path / status (przeglądanie projektu)."""
 
 from __future__ import annotations
 
@@ -9,10 +10,12 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
+from .browse import artifact_dir_name, gross_total, invoice_dirs, invoice_rows, ledger_profiles
 from .config import PROJECT_ROOT, Config, Profile, load_config
-from .doctor import FAIL, OK, WARN, run_checks
+from .doctor import FAIL, OK, WARN, line_count, run_checks
 from .invoice import (
     Invoice,
     build_invoice,
@@ -36,6 +39,12 @@ from .visualize import PDF_HINT, to_html, to_pdf
 
 app = typer.Typer(help="Wystawianie powtarzalnych faktur sprzedażowych w KSeF.", no_args_is_help=True)
 console = Console()
+
+# Osobna konsola na stderr dla komend przeglądania: `list --json | jq` i
+# `open $(ksef-invoice path ...)` wymagają, żeby na stdout był wyłącznie payload.
+# soft_wrap, bo w tych komunikatach są ścieżki — twarde zawijanie rich-a wstawiłoby
+# w środek ścieżki znak nowej linii i zepsuło kopiowanie oraz grep.
+err_console = Console(stderr=True, soft_wrap=True)
 
 
 def _parse_nets(nets: list[str]) -> list[Decimal]:
@@ -61,6 +70,32 @@ def _resolve_profile(config: Config, name: str | None) -> Profile:
     return config.profiles[name]
 
 
+def _known_profiles(config: Config, environment: str) -> set[str]:
+    """Nazwy z config.toml plus nazwy z rejestru. Rejestr jest historią: profil usunięty
+    z konfiguracji nadal ma wystawione faktury, których nie wolno schować."""
+    return set(config.profiles) | ledger_profiles(config, environment)
+
+
+def _resolve_profile_name(config: Config, environment: str, name: str | None) -> str:
+    """Nazwa profilu dla komend tylko do odczytu (`path`, `status`, `pdf`).
+
+    Nazwę podaną jawnie walidujemy sumą config.toml + rejestr: `list` pokazuje historię
+    profilu usuniętego z konfiguracji i odsyła w stopce do `status` oraz `path`, więc te
+    komendy nie mogą na tę samą nazwę odpowiadać „Nieznany profil". Ścieżka wystawiania
+    (`render`/`send`) zostaje przy `_resolve_profile` — bez sekcji w config.toml nie ma
+    szablonu ani stawki VAT, więc faktury i tak nie da się złożyć.
+
+    Brak nazwy zostaje przy autowyborze z config.toml: profile z samego rejestru w tej
+    sumie zmieniłyby zachowanie istniejących wywołań bez `--profile`.
+    """
+    if name is None:
+        return _resolve_profile(config, None).name
+    known = _known_profiles(config, environment)
+    if name not in known:
+        raise typer.BadParameter(f"Nieznany profil {name!r}. Dostępne: {', '.join(sorted(known))}")
+    return name
+
+
 def _allocate_number(config: Config, ledger: Ledger, month: str, seq: int | None) -> tuple[int, int, str]:
     """Zwraca (seq, year, numer) — seq z ledgera albo z flagi --seq."""
     # Parsujemy tym samym kodem co build_invoice, żeby zły --month dał komunikat,
@@ -74,8 +109,10 @@ def _allocate_number(config: Config, ledger: Ledger, month: str, seq: int | None
 
 
 def _invoice_dir(config: Config, profile: Profile, invoice: Invoice) -> Path:
-    safe_number = invoice.number.replace("/", "-").replace(" ", "_")
-    return config.out_dir / config.environment / profile.name / f"{invoice.month}_{safe_number}"
+    # Nazwa katalogu przez artifact_dir_name, bo `list` szuka po niej tej samej faktury —
+    # druga kopia tej reguły dawała w listingu ścieżkę innej faktury niż wpis obok niej.
+    name = artifact_dir_name(invoice.month, invoice.number)
+    return config.out_dir / config.environment / profile.name / name
 
 
 def _print_summary(config: Config, profile: Profile, invoice: Invoice) -> None:
@@ -135,6 +172,10 @@ def _write_visualizations(target: Path, xml: bytes) -> Path:
 NET_HELP = (
     "Kwota netto pozycji; powtórz dla kolejnych pozycji w kolejności z faktury, np. --net 1000 --net 500"
 )
+
+# Komendy tylko do odczytu przyjmują też profil obecny wyłącznie w rejestrze — inaczej
+# odmawiałyby profilu, którego fakturę `list` właśnie wypisał.
+PROFILE_READ_HELP = "Nazwa profilu z config.toml albo z historii w rejestrze"
 
 
 @app.command()
@@ -267,16 +308,22 @@ def send(
 @app.command()
 def pdf(
     month: str = typer.Option(..., "--month", help="Miesiąc faktury, np. 2026-07"),
-    profile: str = typer.Option(None, "--profile", help="Nazwa profilu z config.toml"),
+    profile: str = typer.Option(None, "--profile", help=PROFILE_READ_HELP),
     prod: bool = typer.Option(False, "--prod", help="Faktura produkcyjna."),
 ) -> None:
     """Wygeneruj HTML+PDF dla już zapisanej faktury z out/ (np. wysłanej wcześniej)."""
     config = load_config()
-    selected = _resolve_profile(config, profile)
     environment = "prod" if prod else config.environment
-    matches = sorted((config.out_dir / environment / selected.name).glob(f"{month}_*/invoice.xml"))
+    selected = _resolve_profile_name(config, environment, profile)
+    # Ten sam glob co `path`, żeby obie komendy nie mogły się rozjechać co do tego,
+    # które katalogi istnieją.
+    matches = [
+        directory / "invoice.xml"
+        for directory in invoice_dirs(config, environment, selected, month)
+        if (directory / "invoice.xml").exists()
+    ]
     if not matches:
-        console.print(f"Brak zapisanej faktury {selected.name} za {month} ({environment}) w out/.")
+        console.print(f"Brak zapisanej faktury {selected} za {month} ({environment}) w out/.")
         raise typer.Exit(code=1)
     for xml_path in matches:
         console.print(f"✅ {_write_visualizations(xml_path.parent, xml_path.read_bytes())}")
@@ -285,16 +332,16 @@ def pdf(
 @app.command()
 def status(
     month: str = typer.Option(..., "--month", help="Miesiąc faktury, np. 2026-07"),
-    profile: str = typer.Option(None, "--profile", help="Nazwa profilu z config.toml"),
+    profile: str = typer.Option(None, "--profile", help=PROFILE_READ_HELP),
     prod: bool = typer.Option(False, "--prod", help="Sprawdź wpis produkcyjny."),
 ) -> None:
     """Pokaż zapisany status faktury za dany miesiąc (z lokalnego ledgera)."""
     config = load_config()
-    selected = _resolve_profile(config, profile)
     environment = "prod" if prod else config.environment
-    entry = Ledger(config.out_dir / "ledger.json").get(environment, selected.name, month)
+    selected = _resolve_profile_name(config, environment, profile)
+    entry = Ledger(config.out_dir / "ledger.json").get(environment, selected, month)
     if not entry:
-        console.print(f"Brak wpisu {selected.name} za {month} ({environment}).")
+        console.print(f"Brak wpisu {selected} za {month} ({environment}).")
         raise typer.Exit(code=1)
     console.print_json(json.dumps(entry, ensure_ascii=False))
 
@@ -306,6 +353,182 @@ def _template_ref(target: Path, root: Path) -> str:
         return str(target.resolve().relative_to(root.resolve()))
     except ValueError:
         return str(target)
+
+
+def _vat_label(profile: Profile) -> str:
+    return "np" if profile.vat_rate == "np" else f"{profile.vat_rate}%"
+
+
+def _due_label(profile: Profile) -> str:
+    """config.py gwarantuje dokładnie jedną regułę terminu (i default due_days=14)."""
+    if profile.due_day_next_month is not None:
+        return f"{profile.due_day_next_month}. dnia nast. m-ca"
+    return f"+{profile.due_days} dni"
+
+
+@app.command()
+def profiles(
+    as_json: bool = typer.Option(False, "--json", help="Wypisz profile jako JSON (dla skryptów)."),
+) -> None:
+    """Pokaż profile z config.toml: ile kwot --net, stawka VAT, termin płatności, szablon."""
+    config = load_config()
+    ordered = sorted(config.profiles.values(), key=lambda item: item.name)
+    # Sam odczyt placeholderów {{lineN_net}} — bez próbnego renderu i walidacji XSD,
+    # które robi `doctor`. To ma być natychmiastowe „co ja tu mam".
+    nets = {profile.name: line_count(profile.template_path) for profile in ordered}
+
+    if as_json:
+        payload = {
+            "nip": config.nip,
+            "number_format": config.number_format,
+            "environment": config.environment,
+            # Bez tokenu, świadomie: .env leży obok config.toml i load_config wciąga
+            # KSEF_TOKEN do Config — kontrakt maszynowy nie może go wynieść.
+            "profiles": [
+                {
+                    "name": profile.name,
+                    "nets": nets[profile.name],
+                    "vat_rate": profile.vat_rate,
+                    "issue_day": profile.issue_day,
+                    "due_days": profile.due_days,
+                    "due_day_next_month": profile.due_day_next_month,
+                    "template": _template_ref(profile.template_path, PROJECT_ROOT),
+                }
+                for profile in ordered
+            ],
+        }
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    # Bez kolumny z dniem wystawienia: to jedyny knob, którego praktycznie nikt nie zmienia
+    # (default "today"), a przy 80 kolumnach jego nagłówek kosztuje tyle, że zaczynają
+    # zawijać się kolumny z treścią. Wartość zostaje w --json i w podsumowaniu `render`.
+    table = Table(title=f"Profile (NIP {config.nip})")
+    for column in ("profil", "--net", "VAT", "termin", "szablon"):
+        table.add_column(column, overflow="fold")
+    for profile in ordered:
+        # escape na wartościach z config.toml — rich traktuje [...] jako znacznik stylu.
+        table.add_row(
+            escape(profile.name),
+            str(nets[profile.name]),
+            _vat_label(profile),
+            _due_label(profile),
+            escape(_template_ref(profile.template_path, PROJECT_ROOT)),
+        )
+    console.print(table)
+    console.print("\nSpójność profili (próbny render + XSD) sprawdza [bold]uv run ksef-invoice doctor[/].")
+
+
+# Nazwa funkcji NIE może być `list`: cli.py ma `from __future__ import annotations`, więc
+# Typer rozwiązuje `net: list[str]` z render/send przez get_type_hints w globalsach modułu —
+# `list` na poziomie modułu przesłoniłby builtin i urwał te dwie komendy.
+@app.command("list")
+def list_invoices(
+    profile: str = typer.Option(None, "--profile", help="Tylko ten profil (domyślnie: wszystkie)"),
+    year: int = typer.Option(None, "--year", help="Tylko faktury z tego roku, np. 2026"),
+    prod: bool = typer.Option(False, "--prod", help="Pokaż faktury produkcyjne."),
+    as_json: bool = typer.Option(False, "--json", help="Wypisz listę jako JSON (dla skryptów)."),
+) -> None:
+    """Pokaż wystawione faktury z lokalnego rejestru (out/ledger.json) — nie pyta KSeF."""
+    config = load_config()
+    environment = "prod" if prod else config.environment
+
+    if profile is not None:
+        # Walidujemy, ale nie przez _resolve_profile_name: tu brak --profile znaczy
+        # „wszystkie", nie autowybór jedynego profilu. Literówka bez tej walidacji wygląda
+        # jak „brak faktur" — najgorszy fałszywy negatyw w narzędziu, w którym numeracja
+        # ma skutki prawne.
+        known = _known_profiles(config, environment)
+        if profile not in known:
+            raise typer.BadParameter(f"Nieznany profil {profile!r}. Dostępne: {', '.join(sorted(known))}")
+
+    rows = invoice_rows(config, environment, profile=profile, year=year)
+
+    if as_json:
+        payload = {
+            "environment": environment,
+            "count": len(rows),
+            "gross_total": str(gross_total(rows)),
+            "invoices": [
+                {
+                    "month": row.month,
+                    "profile": row.profile,
+                    "number": row.number,
+                    "seq": row.seq,
+                    "net": row.net,
+                    "vat": row.vat,
+                    "gross": row.gross,
+                    "ksef_number": row.ksef_number,
+                    "acquisition_date": row.acquisition_date,
+                    "sent_at": row.sent_at,
+                    # Bezwzględna — maszyna nie ma sklejać ścieżek. null = nic na dysku.
+                    "dir": str(row.directory) if row.directory else None,
+                }
+                for row in rows
+            ],
+        }
+        typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    label = "[bold red]PROD[/]" if environment == "prod" else environment
+    if not rows:
+        # Kod 0, nie 1: `status` pyta o konkretną fakturę i jej brak jest błędem, a `list`
+        # przegląda — „jeszcze nic nie wystawiono" to prawidłowa odpowiedź, nie awaria.
+        # soft_wrap, bo w komunikacie jest ścieżka — twarde zawijanie rich-a wstawiłoby
+        # w jej środek znak nowej linii i zepsuło kopiowanie oraz grep.
+        console.print(
+            f"Brak wystawionych faktur ({label}) w {config.out_dir / 'ledger.json'}.", soft_wrap=True
+        )
+        return
+
+    # Świadomie wąska tabela. Numeru KSeF (35 znaków) i ścieżki katalogu tu nie ma:
+    # przy 80 kolumnach obie zawijają się w środku, a zawinięty identyfikator nie da się
+    # skopiować, więc kolumna kosztuje czytelność i nic nie daje. Ścieżka jest zresztą
+    # w całości wyprowadzalna z pozostałych kolumn — niesie tylko „istnieje czy nie",
+    # i to zostaje jako `pliki`. Pełne wartości: `--json` i `status --month`.
+    table = Table(title=f"Faktury ({label})")
+    table.add_column("miesiąc")
+    table.add_column("profil", overflow="fold")
+    table.add_column("numer", overflow="fold")
+    table.add_column("brutto (PLN)", justify="right")
+    table.add_column("pliki", justify="center")
+    for row in rows:
+        table.add_row(
+            row.month,
+            escape(row.profile),
+            escape(row.number or "—"),
+            row.gross or "—",
+            # „—" tu znaczy: ledger zna fakturę, ale w out/ nic nie leży. Typowo katalog
+            # projektu skopiowany bez out/ albo ręcznie posprzątane artefakty.
+            "✓" if row.directory else "—",
+        )
+    console.print(table)
+    console.print(f"Razem: {len(rows)} z rejestru, {gross_total(rows)} PLN brutto.")
+    console.print(
+        "[dim]Numer KSeF i pozostałe pola: uv run ksef-invoice status --profile <p> --month <RRRR-MM>. "
+        "Katalog: uv run ksef-invoice path --profile <p> --month <RRRR-MM>.[/]"
+    )
+
+
+@app.command()
+def path(
+    month: str = typer.Option(..., "--month", help="Miesiąc faktury, np. 2026-07"),
+    profile: str = typer.Option(None, "--profile", help=PROFILE_READ_HELP),
+    prod: bool = typer.Option(False, "--prod", help="Faktura produkcyjna."),
+) -> None:
+    """Wypisz katalog z artefaktami faktury — do `open $(uv run ksef-invoice path --month ...)`."""
+    config = load_config()
+    environment = "prod" if prod else config.environment
+    selected = _resolve_profile_name(config, environment, profile)
+    directories = invoice_dirs(config, environment, selected, month)
+    if not directories:
+        err_console.print(f"[red]Brak zapisanej faktury {selected} za {month} ({environment}) w out/.[/]")
+        raise typer.Exit(code=1)
+    for directory in directories:
+        # typer.echo, nie console.print: rich zawija do szerokości terminala i wstawiłby
+        # znak nowej linii w środek ścieżki, co psuje podstawienie `$(...)`.
+        # Wiele katalogów na jeden miesiąc to realny stan po `send --force`.
+        typer.echo(str(directory))
 
 
 @app.command()
