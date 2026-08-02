@@ -1,10 +1,6 @@
 <div align="center">
 
-<img
-  src="docs/assets/ksef-invoice-cover.png"
-  alt="ksef-invoice — powtarzalne faktury sprzedażowe w KSeF; jeden profil, jedna komenda, FA(3)"
-  width="100%"
->
+<img src="docs/assets/ksef-invoice-cover.png" alt="ksef-invoice — powtarzalne faktury sprzedażowe w KSeF; jeden profil, jedna komenda, FA(3)" width="100%">
 
 [![Test](https://github.com/dominikwozniak/ksef-invoice/actions/workflows/test.yaml/badge.svg)](https://github.com/dominikwozniak/ksef-invoice/actions/workflows/test.yaml)
 [![Lint](https://github.com/dominikwozniak/ksef-invoice/actions/workflows/lint.yaml/badge.svg)](https://github.com/dominikwozniak/ksef-invoice/actions/workflows/lint.yaml)
