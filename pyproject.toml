@@ -1,6 +1,6 @@
 [project]
 name = "ksef-invoice"
-version = "0.1.0"
+version = "0.2.0"
 description = "Wystawianie powtarzalnych faktur sprzedażowych w KSeF (API 2.0, FA(3))"
 readme = "README.md"
 license = "MIT"
